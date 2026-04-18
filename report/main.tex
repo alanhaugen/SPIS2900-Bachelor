@@ -1,5 +1,6 @@
 \documentclass{article}
 \usepackage{graphicx}
+\usepackage{listings}
 \usepackage{titling}
 \usepackage{parskip}
 \usepackage[
@@ -39,27 +40,32 @@ Hvilke algoritmiske metoder kan bidra til å opprettholde datakonsistens og hån
 \tableofcontents{}
 
 \newpage
+
+\lstlistoflistings
+
+\newpage
+
 \pagenumbering{arabic}
 
 \section{Introduction}
 
-This thesis examines a large-scale survival multiplayer game built using Unreal Engine 5.2. The game features a persistent multiplayer world shared by thousands of players. As with many large-scale online survival games, player progression, world state, and faction dynamics are centrally stored in cloud-hosted SQL databases.
+This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs are fitting for a persistent multiplayer world shared by thousands of players. Solutions are designed to support large-scale online survival games which needs to store player progression, world state, and faction dynamics. The solutions are not intended to store or transmit ethereal information such as player position or combat related replication, instead only long-term storage data of the kind which can typically be stored in central cloud-hosted SQL databases are of consideration.
 
-For a planned console re-release in 2026, the game is intended to support offline functionality. On console platforms, access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments. To broaden accessibility and market reach, it becomes necessary to support offline play and local cooperative modes while preserving core gameplay mechanics.
+The suggested designs are intended to provide ways to support both offline and online functionality. Having the ability to make your game run offline is important, as on console platforms access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends is should be supported via local cooperative modes while preserving core gameplay mechanics.
 
-This requirement introduces architectural challenges. In the original PC release, persistent game state is stored exclusively in cloud-based SQL databases, and the game assumes continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally—potentially using embedded database solutions such as SQLite—and later synchronized with the authoritative cloud-based server infrastructure.
+This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assumes continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite which can later be synchronized with the authoritative cloud-based server infrastructure.
 
-The game begins with the player stranded on an alien planet, where survival depends on gathering resources and establishing a personal foothold. As the player progresses, collaboration with other players becomes necessary to navigate the harsh environment. In the endgame, political dynamics and faction-based conflict play a central role, as groups of players compete for control and influence within the game’s persistent world. The early stages of the game are well-suited for single-player experiences, whereas the endgame is designed to require online connectivity and interaction with other players.
+Many gamers prefer to play offline, but might want to connect online as they progress through the environment. Collaboration with other players becomes necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world. Designs which allow users to login online later after initial offline play sessions are described.
 
-This thesis therefore investigates the following research question: What algorithmic strategies can ensure data consistency and conflict resolution when synchronizing persistent game state between locally stored and cloud-based systems in survival multiplayer games?
+This thesis investigates the following research statement: What algorithmic strategies can ensure data consistency and conflict resolution when synchronizing persistent game state between locally stored and cloud-based systems in survival multiplayer games?
 
 \newpage
 
-\section{Existing Persistence System}
+\section{Typical Challenges in Persistence Systems}
 
-The game world consists of Actors that may own inventory items, buildings, vehicles, navigation markers, abilities, and quest progression. All persistent game state is centrally stored using an in-house persistence framework built on PostgreSQL.
+Game worlds consists of Actors that may own inventory items, buildings, vehicles, navigation markers, abilities, and quest progression. All persistent game state is typically centrally stored using an in-house persistence framework built on SQL.
 
-The system follows a server-based architecture in which all state-modifying actions are processed through a centralized online infrastructure. Player actions are queued locally and rapidly flushed to online servers for persistence. Multiple server instances may run concurrently; however, at any given time, only one server instance holds authoritative control over a specific player. Player actions are executed as database transactions using PostgreSQL on the authoritative server.
+Such systems follow a server-based architecture in which all state-modifying actions are processed through a centralized online infrastructure. Player actions are queued locally and rapidly flushed to online servers for persistence. Multiple server instances may run concurrently; however, at any given time, only one server instance should have authoritative control over a specific player. Player actions can be executed as database transactions using SQL on the authoritative server.
 
 Within Unreal Engine, communication with backend services occurs through a custom-built system known as the Database Interface (DBI). Rather than generating raw SQL queries directly from the game client, the DBI invokes predefined PostgreSQL functions. Each function executes as a transactional unit within PostgreSQL and can be rolled back if any command within the transaction fails. Consequently, every state-modifying action is encapsulated as an atomic database operation.
 
@@ -69,9 +75,13 @@ This architecture assumes continuous server connectivity and treats the cloud-ho
 
 While this architecture provides strong consistency guarantees in fully online environments, it inherently depends on centralized authority and does not account for state divergence in disconnected or offline scenarios.
 
+\begin{lstlisting}[caption={A listing}]
+    Some source code
+\end{lstlisting}
+
 \subsection{Limitations of existing system}
 
-The current persistence architecture is designed under the assumption of continuous connectivity to a centralized cloud infrastructure. All persistent game state is stored in PostgreSQL databases hosted on backend servers, and the system operates under a server-authoritative model in which the cloud acts as the single source of truth.
+Persistence architecture designed in this fashion operates under the assumption of continuous connectivity to a centralized cloud infrastructure. All persistent game state is stored in SQL databases hosted on backend servers, and the system operates under a server-authoritative model in which the cloud acts as the single source of truth.
 
 While this model ensures strong consistency and transactional integrity in online multiplayer environments, it introduces several architectural limitations when extended to offline or hybrid scenarios.
 
