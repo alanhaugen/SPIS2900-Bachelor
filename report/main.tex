@@ -49,37 +49,41 @@ Hvilke algoritmiske metoder kan bidra til å opprettholde datakonsistens og hån
 
 \section{Introduction}
 
-This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs are fitting for a persistent multiplayer world shared by thousands of players. Solutions are designed to support large-scale online survival games which needs to store player progression, world state, and faction dynamics. The solutions are not intended to store or transmit ethereal information such as player position or combat related replication, instead only long-term storage data of the kind which can typically be stored in central cloud-hosted SQL databases are of consideration.
+This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs are fitting for a persistent multiplayer world shared by thousands of players. Solutions are designed to support large-scale online survival games which need to store player progression, world state, and faction dynamics. The solutions are not intended to store or transmit ethereal information such as player position or combat related replication, instead only long-term storage data of the kind which can typically be stored in central cloud-hosted SQL databases are of consideration.
 
-The suggested designs are intended to provide ways to support both offline and online functionality. Having the ability to make your game run offline is important, as on console platforms access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends is should be supported via local cooperative modes while preserving core gameplay mechanics.
+The suggested designs are intended to provide ways to support both offline and online functionality. Having the ability to make your game run offline is important, as on console platforms access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes while preserving core gameplay mechanics.
 
 This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assumes continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite which can later be synchronized with the authoritative cloud-based server infrastructure.
 
-Many gamers prefer to play offline, but might want to connect online as they progress through the environment. Collaboration with other players becomes necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world. Designs which allow users to login online later after initial offline play sessions are described.
+Many gamers prefer to play offline, but might want to connect online as they advance in the persistent world. Collaboration with other players is often necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world. Designs that allow users to transition online after initial offline sessions are explored.
 
-This thesis investigates the following research statement: What algorithmic strategies can ensure data consistency and conflict resolution when synchronizing persistent game state between locally stored and cloud-based systems in survival multiplayer games?
+This thesis investigates the following research statement: How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?
 
 \newpage
 
 \section{Typical Challenges in Persistence Systems}
 
-Game worlds consists of Actors that may own inventory items, buildings, vehicles, navigation markers, abilities, and quest progression. All persistent game state is typically centrally stored using an in-house persistence framework built on SQL.
+Game worlds consist of actors that may own inventory items, buildings, vehicles, navigation markers, abilities, and quest progression. Persistent game state is commonly stored in centralized persistence systems backed by SQL databases.
 
-Such systems follow a server-based architecture in which all state-modifying actions are processed through a centralized online infrastructure. Player actions are queued locally and rapidly flushed to online servers for persistence. Multiple server instances may run concurrently; however, at any given time, only one server instance should have authoritative control over a specific player. Player actions can be executed as database transactions using SQL on the authoritative server.
+Such systems follow a server-based architecture in which all state-modifying actions are processed through a centralized online infrastructure. Player actions are buffered temporarily before being committed to online servers for persistence. Multiple server instances may run concurrently; however, at any given time, only one server instance should have authoritative control over a specific player. Player actions can be executed as database transactions using SQL on the authoritative server.
 
-Within Unreal Engine, communication with backend services occurs through a custom-built system known as the Database Interface (DBI). Rather than generating raw SQL queries directly from the game client, the DBI invokes predefined PostgreSQL functions. Each function executes as a transactional unit within PostgreSQL and can be rolled back if any command within the transaction fails. Consequently, every state-modifying action is encapsulated as an atomic database operation.
+One possible approach is to apply the Service Locator pattern to provide separate implementations for the communication service which is responsible for generating and receiving SQL commands. This service is called the Database Interface (DBI) from here on. Rather than generating raw SQL queries directly from the game client, the DBI invokes predefined SQL functions. Each function executes as a transactional unit and can be rolled back if any command within the transaction fails. Consequently, every state-modifying action is encapsulated as an atomic database operation.
 
-The DBI enforces atomicity, consistency, and idempotency. If a failure occurs—or if the system is uncertain whether a transaction completed successfully—the DBI may safely retry the corresponding function without risking duplicate or inconsistent state changes.
+The DBI is designed to support atomicity, consistency, and idempotency. If a failure occurs, or if the system is uncertain whether a transaction completed successfully, the DBI may safely retry the corresponding function without risking duplicate or inconsistent state changes. Additional challenges arise under network partitions or concurrent updates, where conflicting replicas may emerge despite transactional guarantees.
 
-This architecture assumes continuous server connectivity and treats the cloud-hosted PostgreSQL database as the single authoritative source of truth for all persistent game state.
+By applying the Service Locator pattern, the DBI API can be swapped out easily for online and offline sessions. On online sessions, the DBI connects to an online backend SQL server. On offline sessions, there are many possible implementations. It could connect to a local SQLite database, or have a unique implementation which is explored more later.
+
+A SQL-based DBI architecture assumes continuous server connectivity and treats the cloud-hosted SQL database as the single authoritative source of truth for all persistent game state.
 
 While this architecture provides strong consistency guarantees in fully online environments, it inherently depends on centralized authority and does not account for state divergence in disconnected or offline scenarios.
 
-\begin{lstlisting}[caption={A listing}]
+\begin{lstlisting}[caption={DBI interface}]
     Some source code
 \end{lstlisting}
 
-\subsection{Limitations of existing system}
+%\section{Conflict Resolution Strategies}
+
+\subsection{Limitations of online server-based systems}
 
 Persistence architecture designed in this fashion operates under the assumption of continuous connectivity to a centralized cloud infrastructure. All persistent game state is stored in SQL databases hosted on backend servers, and the system operates under a server-authoritative model in which the cloud acts as the single source of truth.
 
@@ -91,11 +95,11 @@ The system requires uninterrupted communication between the game client and back
 
 \subsection{Absence of Local Persistence Authority}
 
-In the current model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during runtime, durable storage is exclusively managed by the cloud infrastructure. This design prevents local world progression in disconnected scenarios and complicates support for local cooperative modes.
+In an online server-based current model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during runtime, durable storage is exclusively managed by the cloud infrastructure. This design prevents local world progression in disconnected scenarios and complicates support for local cooperative modes.
 
 \subsection{Lack of Divergence Handling Mechanisms}
 
-The existing architecture assumes a single linear progression of state changes. It does not account for concurrent or divergent modifications occurring in separate environments (e.g., offline sessions modifying the same player or world data as the cloud). Consequently, the system lacks:
+An online-only architecture assumes a single linear progression of state changes. It does not account for concurrent or divergent modifications occurring in separate environments (e.g., offline sessions modifying the same player or world data as the cloud). Consequently, the system lacks:
 
 \begin{enumerate}
   \item Version tracking mechanisms
@@ -150,11 +154,11 @@ Currently, every action that should persist goes through the DBI. By developing 
 
 \subsection{Local Persistence via SQLite}
 
-A direct approach to enabling offline functionality is to extend the existing Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote PostgreSQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
+A direct approach to enabling offline functionality is to extend the existing Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote SQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
 
-SQLite is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike PostgreSQL, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
+SQLite is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike other SQL implementations, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
 
-By preserving the DBI abstraction layer, the system can maintain a consistent programming interface for persistence operations regardless of connectivity state. When offline, DBI calls would be routed to the SQLite backend. When online, calls would be directed to the existing PostgreSQL infrastructure.
+By preserving the DBI abstraction layer, the system can maintain a consistent programming interface for persistence operations regardless of connectivity state. When offline, DBI calls would be routed to the SQLite backend. When online, calls would be directed to the existing SQL infrastructure.
 
 This design minimizes disruption to the gameplay code, as the persistence boundary remains unchanged. However, it introduces challenges related to schema compatibility, transaction semantics, and synchronization between the local SQLite instance and the authoritative cloud database.
 
@@ -164,7 +168,7 @@ An alternative architectural approach considered was the introduction of an Obje
 
 ORM frameworks are common in higher-level languages such as Python and Java, where reflection and dynamic typing simplify runtime type inspection and schema generation. In contrast, implementing a fully featured ORM in C++ presents additional complexity due to the lack of built-in reflection and the need for explicit type registration and serialization logic.
 
-While an ORM could reduce manual database interaction and potentially simplify persistence logic, several factors limited its suitability for the current project. First, the existing architecture already relies on a stable Database Interface (DBI) abstraction connected to predefined PostgreSQL functions. Introducing an ORM would require significant restructuring of this persistence boundary. Second, the project required explicit support for SQLite in offline mode, meaning that any ORM solution would need to maintain compatibility across multiple database backends. Finally, time constraints and integration risks made a full ORM implementation impractical within the scope of this bachelor project.
+While an ORM could reduce manual database interaction and potentially simplify persistence logic, several factors limited its suitability for the current project. First, the existing architecture already relies on a stable Database Interface (DBI) abstraction connected to predefined SQL functions. Introducing an ORM would require significant restructuring of this persistence boundary. Second, the project required explicit support for SQLite in offline mode, meaning that any ORM solution would need to maintain compatibility across multiple database backends. Finally, time constraints and integration risks made a full ORM implementation impractical within the scope of this bachelor project.
 
 For these reasons, the project retained the existing DBI abstraction and instead focused on extending it to support hybrid online–offline persistence rather than replacing it with a generalized object–relational mapping layer.
 
@@ -180,7 +184,7 @@ At the other end of the spectrum, snapshot-based synchronization models allow en
 
 The command-based approach proposed in this thesis represents a middle ground between these extremes. By recording player intent as serialized commands rather than storing divergent state snapshots, synchronization can occur through ordered replay of operations. This reduces the need for complex structural merging and leverages existing transactional guarantees in the backend infrastructure.
 
-Compared to a full object–relational mapping redesign or a distributed consensus-based architecture, the command pattern solution introduces relatively limited structural change to the existing system. It preserves the Database Interface abstraction and integrates naturally with the transactional PostgreSQL backend. At the same time, it enables offline progression through local command logging and deferred synchronization.
+Compared to a full object–relational mapping redesign or a distributed consensus-based architecture, the command pattern solution introduces relatively limited structural change to the existing system. It preserves the Database Interface abstraction and integrates naturally with the transactional SQL backend. At the same time, it enables offline progression through local command logging and deferred synchronization.
 
 However, the approach is not without limitations. Command-based replication assumes that operations are deterministic and replay-safe. It also requires careful handling of ordering, idempotency, and potential conflicts when server-side state evolves independently of offline progress. In large-scale multiplayer environments, additional mechanisms such as version tracking or validation checks may be required to ensure consistency.
 
@@ -192,13 +196,13 @@ Having offline functionality support will prevent the game from having to be con
 
 \section{Conclusion}
 
-This thesis investigated the problem of maintaining consistent persistent game state across locally hosted and cloud-based sessions in a survival multiplayer game. The existing server-authoritative architecture, while robust in fully online environments, assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
+This thesis investigated the problem of maintaining consistent persistent game state across locally hosted and cloud-based sessions in a survival multiplayer game. Server-authoritative architectures have their weaknesses, while robust in fully online environments, assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
 
 Several architectural strategies were considered, including direct local database mirroring through SQLite and the introduction of an object–relational mapping layer. While these approaches provide mechanisms for local persistence, they do not in themselves address the fundamental challenge of synchronizing divergent state between offline and online environments.
 
 To address this challenge, this thesis proposed a command-based replication model inspired by the Command Pattern. Rather than synchronizing complete world snapshots, the system records player intent as serialized commands that can be replayed deterministically against the authoritative server infrastructure. This approach leverages the existing transactional guarantees of the backend while minimizing structural disruption to the current persistence architecture.
 
-The command-based solution offers a balanced trade-off between simplicity and robustness. It preserves the Database Interface abstraction, integrates with both PostgreSQL and SQLite backends, and avoids complex state-merging algorithms. At the same time, it introduces requirements for deterministic execution, ordering guarantees, and conflict validation, which must be carefully managed in large-scale multiplayer environments.
+The command-based solution offers a balanced trade-off between simplicity and robustness. It preserves the Database Interface abstraction, integrates with both SQL and SQLite backends, and avoids complex state-merging algorithms. At the same time, it introduces requirements for deterministic execution, ordering guarantees, and conflict validation, which must be carefully managed in large-scale multiplayer environments.
 
 Overall, the results suggest that a command-based synchronization model provides a practical and extensible foundation for hybrid offline–online persistence in survival video games. While additional mechanisms for conflict detection, validation, and scalability may be required in production systems, the proposed architecture demonstrates that consistent synchronization can be achieved without fundamentally redesigning the existing server-authoritative framework.
 
