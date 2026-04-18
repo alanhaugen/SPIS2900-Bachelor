@@ -2,6 +2,11 @@
 \usepackage{graphicx}
 \usepackage{titling}
 \usepackage{parskip}
+\usepackage[
+    backend=biber,
+    style=apa
+]{biblatex}
+\addbibresource{references.bib}
 
 \title{\textbf{Bachelor thesis\\ \\Saving the Game:\\Consistent Offline-Cloud State Synchronization in Survival Video Games}\\ \\Lagre spillet:\\Konsistent synkronisering av lokal- og skybasert tilstand i overlevelsesspill\\ \\B2VISIM Bachelor in Game Technology and Simulation\\ \\SPIS2900 Bachelor thesis}
 \author{\\Hans Alan Whitburn Haugen}
@@ -100,7 +105,7 @@ The centralized server-authoritative design scales well for persistent multiplay
 
 \subsection{Command-Based State Replication}
 
-To enable offline progression while preserving compatibility with the existing server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software and further discussed in Game Programming Patterns (Nystrøm, 2014).
+To enable offline progression while preserving compatibility with the existing server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
 
 Rather than directly modifying persistent state in the cloud, player actions are encapsulated as serializable command objects. Each command represents an intention to modify game state (e.g., create building, transfer item, complete quest) along with the necessary parameters to execute the modification.
 
@@ -171,7 +176,6 @@ However, the approach is not without limitations. Command-based replication assu
 
 Overall, the proposed architecture aims to balance simplicity, extensibility, and correctness. Rather than introducing a fundamentally new persistence paradigm, it extends the existing transactional model in a way that supports hybrid connectivity while minimizing architectural disruption.
 
-
 \newpage
 
 \section{Conclusion}
@@ -187,5 +191,7 @@ The command-based solution offers a balanced trade-off between simplicity and ro
 Overall, the results suggest that a command-based synchronization model provides a practical and extensible foundation for hybrid offline–online persistence in survival video games. While additional mechanisms for conflict detection, validation, and scalability may be required in production systems, the proposed architecture demonstrates that consistent synchronization can be achieved without fundamentally redesigning the existing server-authoritative framework.
 
 \newpage
+
+\printbibliography
 
 \end{document}

@@ -2,3 +2,7 @@
 *.toc
 *.aux
 *.swp
+*.xml
+*.bbl
+*.blg
+*.bcf
