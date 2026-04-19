@@ -1,6 +1,7 @@
 \documentclass{article}
 \usepackage{graphicx}
 \usepackage{listings}
+\usepackage[dvipsnames,svgnames]{xcolor}
 \usepackage{titling}
 \usepackage{parskip}
 \usepackage{tikz}
@@ -10,6 +11,19 @@
     style=apa
 ]{biblatex}
 \usepackage{hyperref}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color[HTML]{0000AA}\bfseries,
+    commentstyle=\color[HTML]{007700}\itshape,
+    stringstyle=\color[HTML]{AA0000},
+    numberstyle=\color{gray}\tiny,
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    rulecolor=\color{lightgray},
+    backgroundcolor=\color[HTML]{F8F8F8},
+}
 \addbibresource{references.bib}
 
 \title{\textbf{Bachelor thesis\\ \\Saving the Game:\\Consistent Offline-Cloud State Synchronization in Survival Video Games}\\ \\Lagre spillet:\\Konsistent synkronisering av lokal- og skybasert tilstand i overlevelsesspill\\ \\B2VISIM Bachelor in Game Technology and Simulation\\ \\SPIS2900 Bachelor thesis}
@@ -303,29 +317,31 @@ Game code calls DBI methods without knowing which backend is active. When connec
 Figure~\ref{fig:architecture} shows the overall data flow.
 
 \begin{figure}[h]
-\centering
+\flushleft
+\resizebox{\linewidth}{!}{%
 \begin{tikzpicture}[
-    node distance=1.0cm and 1.6cm,
-    box/.style={draw, rounded corners, minimum width=2.8cm, minimum height=0.8cm,
+    node distance=0.9cm and 1.3cm,
+    box/.style={draw, rounded corners, minimum width=2.6cm, minimum height=0.75cm,
                 align=center, font=\small},
-    arr/.style={-{Stealth[length=4pt]}, thick},
-    dasharr/.style={-{Stealth[length=4pt]}, thick, dashed}
+    arr/.style={-{Stealth[length=5pt]}, thick},
+    dasharr/.style={-{Stealth[length=5pt]}, thick, dashed}
 ]
-    \node[box] (game)      {Game Code};
-    \node[box, right=of game] (dbi)  {DBI};
-    \node[box, above right=0.6cm and 1.4cm of dbi] (remote) {Remote SQL\\(online)};
-    \node[box, below right=0.6cm and 1.4cm of dbi] (sqlite) {SQLiteDBI\\+ CommandLog\\(offline)};
-    \node[box, right=4.8cm of dbi] (replay) {ReplayAll};
+    \node[box] (game)   {Game Code};
+    \node[box, right=of game] (dbi) {DBI};
+    \node[box, above right=0.5cm and 1.2cm of dbi] (remote) {Remote SQL\\(online)};
+    \node[box, below right=0.5cm and 1.2cm of dbi] (sqlite) {SQLiteDBI\\+ CommandLog\\(offline)};
+    \node[box, right=4.4cm of dbi] (replay) {ReplayAll};
     \node[box, right=of replay] (server) {Server};
-    \node[box, below=0.9cm of replay] (manifest) {Rejection\\Manifest};
+    \node[box, below=0.8cm of replay] (manifest) {Rejection\\Manifest};
 
-    \draw[arr] (game)   -- node[above,font=\tiny]{action} (dbi);
-    \draw[arr] (dbi)    -- (remote);
-    \draw[arr] (dbi)    -- (sqlite);
-    \draw[dasharr] (sqlite) -- node[above,font=\tiny]{reconnect} (replay);
-    \draw[arr] (replay) -- (server);
-    \draw[arr] (server) -- node[right,font=\tiny]{result} (manifest);
-\end{tikzpicture}
+    \draw[arr]    (game)   -- node[above,font=\scriptsize]{action} (dbi);
+    \draw[arr]    (dbi)    -- (remote);
+    \draw[arr]    (dbi)    -- (sqlite);
+    \draw[dasharr](sqlite) -- node[above,font=\scriptsize]{reconnect} (replay);
+    \draw[arr]    (replay) -- (server);
+    \draw[arr]    (server) -- node[right,font=\scriptsize]{result} (manifest);
+\end{tikzpicture}%
+}
 \caption{Hybrid persistence architecture: game code interacts only with the DBI; the active implementation is swapped at runtime depending on connectivity.}
 \label{fig:architecture}
 \end{figure}
