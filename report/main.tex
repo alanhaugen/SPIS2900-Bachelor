@@ -30,7 +30,7 @@ Many survival games store their world entirely on remote servers. This means the
 
 The core idea is to record each player action as a command rather than immediately sending changes to the server. While offline, these commands queue up locally. When connectivity returns, they are replayed against the authoritative server in order. Conflict resolution becomes a challenge, how should the game respond when another player may have demolished the same building, or claimed the same territory. The thesis addresses this through a conflict resolution strategy that classifies commands by type, some can always be applied regardless of what changed, some need a version check, and some must simply be declined and reported back to the player.
 
-A prototype was built in C++ to validate the design, including a SQLite-backed offline database and a durable command log that survives crashes. 31 automated tests have been written to test the system.
+A prototype was built in C++ to validate the design, including a SQLite-backed offline database and a durable command log that survives crashes.
 
 \section*{Sammendrag}
 
@@ -38,7 +38,7 @@ Mange overlevelsesspill lagrer spillverdenen på eksterne servere. Dette gjør d
 
 Forslaget er å registrere hver spillerhandling som et kommando, i stedet for å sende ny tilstand direkte til serveren. Mens spilleren er frakoblet, samles disse kommandoene opp lokalt. Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når serverens verden har endret, konflikthåndtering blir viktig. Hvordan skal en spiller som har revet ned den samme bygningen eller inntatt det samme territoriet håndteres. Oppgaven løser dette med en konflikthåndteringsstrategi som klassifiserer kommandoer etter type, noen kan alltid anvendes uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
 
-En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og en kommandoliste som overlever at spillet plutselig lukkes. 31 automatiserte tester ha blitt skrevet for å teste systemet.
+En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og en kommandoliste som overlever at spillet plutselig lukkes. 
 \pagenumbering{roman}
 \newpage
 
@@ -112,19 +112,15 @@ The conflict resolution strategy — particularly entity versioning and optimist
 \section{Typical Challenges in Persistence Systems}
 \label{sec:challenges}
 
-Game worlds consist of actors that may own inventory items, buildings, vehicles, navigation markers, abilities, and quest progression. Persistent game state is commonly stored in centralized persistence systems backed by SQL databases.
+Game worlds consist of actors that may own inventory items, buildings, vehicles, navigation markers, abilities, and quest progression. In large-scale online survival games, persistent game state is commonly stored in centralized persistence systems backed by SQL databases hosted on cloud infrastructure.
 
-Such systems follow a server-based architecture in which all state-modifying actions are processed through a centralized online infrastructure. Player actions are buffered temporarily before being committed to online servers for persistence. Multiple server instances may run concurrently; however, at any given time, only one server instance should have authoritative control over a specific player. Player actions can be executed as database transactions using SQL on the authoritative server.
+Such systems typically follow a server-authoritative architecture in which all state-modifying actions are processed through a centralized backend. Player actions are buffered temporarily on the client before being committed to the authoritative server. Multiple server instances may run concurrently, but at any given time only one instance holds authoritative control over a given player or region. Actions are executed as database transactions, providing rollback in the event of failure.
 
-One possible approach is to apply the Service Locator pattern to provide separate implementations for the communication service which is responsible for generating and receiving SQL commands. This service is hereafter referred to as the Database Interface (DBI). Rather than generating raw SQL queries directly from the game client, the DBI invokes predefined SQL functions. Each function executes as a transactional unit and can be rolled back if any command within the transaction fails. Consequently, every state-modifying action is encapsulated as an atomic database operation.
+A common design pattern for this kind of system is to apply the Service Locator pattern to abstract the communication layer responsible for generating and dispatching persistence commands. This abstraction is hereafter referred to as the Database Interface (DBI). Rather than issuing raw SQL queries directly from game code, the DBI invokes predefined server-side functions. Each function executes as a transactional unit and can be rolled back if any step fails, so every state-modifying action is encapsulated as an atomic database operation.
 
-The DBI is designed to support atomicity, consistency, and idempotency. If a failure occurs, or if the system is uncertain whether a transaction completed successfully, the DBI may safely retry the corresponding function without risking duplicate or inconsistent state changes. Additional challenges arise under network partitions or concurrent updates, where conflicting replicas may emerge despite transactional guarantees.
+A well-designed DBI supports atomicity, consistency, and idempotency. If a network failure occurs, or if the client is uncertain whether a transaction completed, the DBI can safely retry without risking duplicate or inconsistent state changes. An important structural advantage of this abstraction is that the DBI can be swapped out via the Service Locator pattern: an online session routes calls to the remote SQL backend, while an offline session could route them to a local implementation — the implications of which are explored in Section~\ref{sec:architecture}.
 
-By applying the Service Locator pattern, the DBI API can be swapped out easily for online and offline sessions. On online sessions, the DBI connects to an online backend SQL server. On offline sessions, there are many possible implementations. It could connect to a local SQLite database, or have a unique implementation which is explored more later.
-
-A SQL-based DBI architecture assumes continuous server connectivity and treats the cloud-hosted SQL database as the single authoritative source of truth for all persistent game state.
-
-While this architecture provides strong consistency guarantees in fully online environments, it inherently depends on centralized authority and does not account for state divergence in disconnected or offline scenarios.
+A SQL-based DBI architecture treats the cloud-hosted SQL database as the single authoritative source of truth for all persistent game state. This provides strong consistency guarantees in fully online environments, but it inherently depends on centralized authority and does not account for state divergence in disconnected scenarios.
 
 \begin{lstlisting}[language=C++, caption={DBI interface (abstract base class)}]
 class IDatabaseInterface
@@ -146,23 +142,21 @@ public:
 };
 \end{lstlisting}
 
-\subsection{Limitations of online server-based systems}
+\subsection{Limitations of Server-Authoritative Architectures}
 
-Persistence architecture designed in this fashion operates under the assumption of continuous connectivity to a centralized cloud infrastructure. All persistent game state is stored in SQL databases hosted on backend servers, and the system operates under a server-authoritative model in which the cloud acts as the single source of truth.
-
-While this model ensures strong consistency and transactional integrity in online multiplayer environments, it introduces several architectural limitations when extended to offline or hybrid scenarios.
+A server-authoritative persistence architecture operates under the assumption of continuous connectivity to a centralized cloud infrastructure. While this model ensures strong consistency and transactional integrity in online multiplayer environments, it introduces several limitations when extended to offline or hybrid scenarios.
 
 \subsection{Dependence on Continuous Connectivity}
 
-The system requires uninterrupted communication between the game client and backend services. Because all state-modifying actions are executed as remote transactions, gameplay cannot progress without server access. This dependency prevents offline play and limits deployment flexibility on platforms where online access may be restricted or subscription-based.
+Because all state-modifying actions are executed as remote transactions, gameplay cannot progress without server access. This dependency prevents offline play entirely and limits deployment flexibility on platforms where online access may be restricted or requires a paid subscription service.
 
 \subsection{Absence of Local Persistence Authority}
 
-In the current online server-based model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during runtime, durable storage is exclusively managed by the cloud infrastructure. This design prevents local world progression in disconnected scenarios and complicates support for local cooperative modes.
+In a purely server-authoritative model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during a session, durable storage is exclusively managed by the remote infrastructure. This prevents local world progression in disconnected scenarios and complicates support for local cooperative play modes.
 
 \subsection{Lack of Divergence Handling Mechanisms}
 
-An online-only architecture assumes a single linear progression of state changes. It does not account for concurrent or divergent modifications occurring in separate environments (e.g., offline sessions modifying the same player or world data as the cloud). Consequently, the system lacks:
+A server-authoritative architecture assumes a single linear progression of state changes and does not account for concurrent or divergent modifications occurring in separate environments — for example, an offline client and the live server both modifying the same entity. Consequently, such architectures typically lack:
 
 \begin{enumerate}
   \item Version tracking mechanisms
@@ -170,11 +164,11 @@ An online-only architecture assumes a single linear progression of state changes
   \item Deterministic merge policies
 \end{enumerate}
 
-Without these components, synchronization between locally modified state and cloud-based state cannot be performed safely.
+Without these components, safely synchronizing locally modified state with cloud-based state is not possible.
 
-\subsection{Scalability vs. Flexibility Trade-off}
+\subsection{Scalability vs.\ Flexibility Trade-off}
 
-The centralized server-authoritative design scales well for persistent multiplayer environments but sacrifices flexibility. Any extension toward hybrid offline–online play requires introducing distributed state management, which the current architecture was not designed to support.
+A centralized server-authoritative design scales well for persistent multiplayer environments but sacrifices flexibility. Extending it toward hybrid offline–online play requires introducing distributed state management — concerns that a purely server-authoritative architecture was not originally designed to address.
 
 \newpage
 
@@ -427,21 +421,41 @@ A full session of 10,000 commands completes in approximately 38 ms end-to-end. S
 
 \section{Discussion}
 
-Persistent state management in online multiplayer games can be implemented using a wide range of architectural strategies. These range from simple centralized database models to more complex distributed synchronization systems. Each approach introduces trade-offs in terms of implementation complexity, scalability, maintainability, and consistency guarantees.
+\subsection{Architectural Trade-offs}
 
-A purely server-authoritative architecture, such as the one described in the existing system, provides strong consistency and simplifies conflict resolution by maintaining a single source of truth. However, this model assumes continuous connectivity and does not naturally support offline progression or hybrid play modes.
+Persistent state management in online multiplayer games can be implemented using a wide range of architectural strategies, each with different trade-offs between consistency, flexibility, and implementation complexity.
 
-At the other end of the spectrum, snapshot-based synchronization models allow entire world states to be stored locally and merged with cloud-based state upon reconnection. While conceptually straightforward, snapshot merging introduces significant challenges in conflict detection, state reconciliation, and deterministic resolution of concurrent modifications. As the complexity of the world model increases—particularly in survival games with persistent player-owned structures and factional systems—state merging becomes increasingly difficult to reason about.
+A purely server-authoritative architecture provides strong consistency by maintaining a single source of truth, but it cannot support offline play and becomes unavailable the moment a player loses connectivity. Snapshot-based synchronization allows entire world states to be stored locally and merged upon reconnection, but merging divergent snapshots becomes increasingly difficult as the world model grows more complex — particularly in survival games with player-owned structures, faction relations, and quest progression that interact in non-trivial ways.
 
-The command-based approach proposed in this thesis represents a middle ground between these extremes. By recording player intent as serialized commands rather than storing divergent state snapshots, synchronization can occur through ordered replay of operations. This reduces the need for complex structural merging and leverages existing transactional guarantees in the backend infrastructure.
+The command-based approach proposed here sits between these two extremes. By recording player intent as serialized commands rather than storing divergent state snapshots, synchronization occurs through ordered replay rather than structural merging. This preserves the existing transactional guarantees of the backend while keeping the local state representation minimal. Compared to adopting CRDTs or operational transformation, it also requires substantially less redesign of the existing persistence layer, at the cost of requiring careful conflict classification and server-side validation.
 
-Compared to a full object–relational mapping redesign or a distributed consensus-based architecture, the command pattern solution introduces relatively limited structural change to the existing system. It preserves the Database Interface abstraction and integrates naturally with the transactional SQL backend. At the same time, it enables offline progression through local command logging and deferred synchronization.
+\subsection{Evaluation Findings}
 
-However, the approach is not without limitations. Command-based replication assumes that operations are deterministic and replay-safe. The conflict resolution strategy proposed here — entity versioning combined with per-type resolution policies — addresses the common cases, but edge cases remain. Commands that depend on entities deleted by other players during the offline session cannot be recovered by version comparison alone and must be caught by pre-condition checks during server-side validation. In sufficiently large-scale environments, the volume of pending commands and the breadth of pre-condition logic could also introduce replay latency that affects the reconnection experience.
+The benchmark results support the architectural claims in several concrete ways.
 
-Overall, the proposed architecture aims to balance simplicity, extensibility, and correctness. Rather than introducing a fundamentally new persistence paradigm, it extends the existing transactional model in a way that supports hybrid connectivity while minimizing architectural disruption.
+The replay throughput experiments show that processing a command log of 10,000 entries takes under 2 ms in the in-memory case and under 7 ms including SQLite retrieval. These figures suggest that reconnection latency attributable to the synchronization mechanism itself is unlikely to be perceptible in practice. The data transmitted on reconnection scales with the number of actions taken offline rather than with the size of the world, which is a meaningful advantage over snapshot-based approaches in large persistent worlds.
 
-Having offline functionality support will prevent the game from having to be connected to the publisher in order to function. This is important for games as cultural products, making them available after companies shut down online services for their games \autocite{ross}.
+The conflict rate experiment provides a particularly useful result: throughput varies by less than 20\% across the full range of conflict rates, from 0\% to 100\%. This means the system does not degrade meaningfully under adversarial conditions, and conflict detection can be considered a negligible overhead rather than a potential bottleneck.
+
+The benchmarking process also revealed a design flaw in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} individually for each resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour that was not apparent from code review alone: 50,000 commands took nearly 3 seconds before the fix and 9 ms after. This illustrates the value of performance testing as part of the design process, not just as a post-hoc validation step.
+
+\subsection{Scalability Considerations}
+
+The benchmarks characterise the performance of a single-client replay on one machine, which is a necessary but not sufficient basis for scalability claims about a large-scale multiplayer game. Several factors outside the scope of the prototype would affect performance in a production environment.
+
+First, network latency is not modelled. Transmitting a command log over the network and waiting for server acknowledgements would dominate the reconnection time for large logs, dwarfing the sub-millisecond replay costs measured here. Second, the server-side validation logic — checking entity versions and preconditions — was evaluated against an in-memory store. Against a real SQL database under concurrent load from many reconnecting players, validation throughput would depend heavily on database indexing, connection pooling, and transaction isolation levels. Third, the benchmarks use a synthetic workload with uniformly distributed entity access. Real player behaviour may be bursty and spatially clustered, which could affect conflict rates and cache behaviour in ways not captured by the synthetic experiments.
+
+These limitations do not undermine the core design, but they do mean that the benchmark results should be treated as indicative of single-client algorithmic performance rather than a prediction of production capacity.
+
+\subsection{Limitations and Threats to Validity}
+
+The conflict resolution strategy handles the three command classes identified in this thesis — idempotent, commutative, and non-commutative — but does not cover all edge cases that a production system would encounter. The most significant gap is commands that depend on entities which were deleted server-side during the offline session: these are caught by the existence check in \texttt{ReplayCommand}, but the player receives only a rejection notification with no automatic recovery path. A production system would need policies for how to surface and resolve these failures in a way that makes sense within the game's design.
+
+The evaluation workload was generated synthetically using a uniform random distribution over entities and command types. It is not known whether this distribution is representative of real player behaviour, which likely varies by game genre, session length, and player experience level. Collecting telemetry from real offline sessions would allow future work to calibrate the benchmark parameters and test the system under more realistic conditions.
+
+\subsection{Game Preservation}
+
+Beyond the technical design, offline functionality has an important consequence for the long-term availability of games as cultural artefacts. Games that depend on continuous server connectivity cease to function when the developer shuts down the online service, whether due to bankruptcy, acquisition, or commercial decision. Building in offline capability means that the game remains playable independently of the publisher's infrastructure, which is directly relevant to current policy debates around game preservation \autocite{ross}.
 
 \newpage
 
