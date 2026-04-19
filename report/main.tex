@@ -185,6 +185,58 @@ This system will have to be designed with integrity guarantees in mind: since co
   \item What happens if commands depend on server-side changes
 \end{enumerate}
 
+\subsection{Conflict Resolution Strategy}
+
+When offline commands are replayed against the authoritative server, conflicts arise when the server state has diverged from the state against which those commands were originally generated. A command that was valid at the time of creation may produce an invalid or inconsistent state transition when applied to an evolved world.
+
+\subsubsection{Conflict Detection via Entity Versioning}
+
+Each persistent entity (e.g.\ a building, an inventory slot, or a faction) is assigned a monotonically increasing version number that is incremented with every committed state change. When a command is generated offline, the version of each affected entity is recorded alongside the command parameters. Upon replay, the server compares the recorded version against the current entity version. A mismatch indicates that the entity was modified after the command was issued, signalling a potential conflict.
+
+This mechanism mirrors optimistic concurrency control (OCC) in traditional database systems, where transactions proceed without locking but are validated at commit time \autocite{bernstein1981concurrency}.
+
+\subsubsection{Command Classification}
+
+Not all version mismatches require rejection. Commands can be classified by their conflict behaviour:
+
+\begin{enumerate}
+  \item \textbf{Idempotent commands} — Quest completion, achievement unlocks, and similar one-time flags. These produce the same result regardless of how many times they are applied and can be safely replayed unconditionally.
+  \item \textbf{Commutative commands} — Additive operations such as resource collection or faction reputation deltas. Because the order of application does not affect the final value, these can be merged without conflict by summing the deltas.
+  \item \textbf{Non-commutative commands} — Destructive or positional operations such as demolishing a building or placing a structure on a specific grid cell. These depend on preconditions that may have been invalidated by independent server-side changes.
+\end{enumerate}
+
+\subsubsection{Resolution Policies}
+
+For each conflict class, a deterministic resolution policy is applied server-side before any command is committed.
+
+\begin{lstlisting}[language=C++, caption={Server-side command validation and conflict resolution}]
+ReplayResult ReplayCommand(const Command& cmd, Database& db)
+{
+    Entity entity = db.GetEntity(cmd.entityId);
+
+    // Idempotent: already applied, skip silently
+    if (db.IsAlreadyApplied(cmd.idempotencyKey))
+        return ReplayResult::Duplicate;
+
+    // Commutative: apply delta regardless of version
+    if (cmd.type == "ResourceDelta" || cmd.type == "ReputationDelta")
+        return db.ApplyDelta(cmd);
+
+    // Non-commutative: validate preconditions
+    if (entity.version != cmd.expectedVersion)
+        return ReplayResult::Conflict;
+
+    if (!entity.MeetsPreConditions(cmd))
+        return ReplayResult::Rejected;
+
+    return db.Commit(cmd);
+}
+\end{lstlisting}
+
+\subsubsection{Rejection Manifest}
+
+Commands that fail validation are not silently discarded. Instead, they are collected into a rejection manifest that is returned to the client after the replay pass completes. The manifest records the command type, the reason for rejection, and the current server-side state of the affected entity. This allows the game to inform the player of which offline actions could not be applied and why, enabling the client to present meaningful feedback rather than silently losing progress.
+
 \subsection{Integration Possibilities}
 
 Currently, every action that should persist goes through the DBI. By developing the DBI into a factory which produces commands, one can create a system which lets the player either create online commands, which are queued and sent to the server as before, or simply stored on disk and used when a  player connects to the server. 
