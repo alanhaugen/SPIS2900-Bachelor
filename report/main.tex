@@ -285,15 +285,23 @@ Having offline functionality support will prevent the game from having to be con
 
 \section{Conclusion}
 
-This thesis investigated the problem of maintaining consistent persistent game state across locally hosted and cloud-based sessions in a survival multiplayer game. Server-authoritative architectures have their weaknesses, while robust in fully online environments, assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
+This thesis investigated the following research question: How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?
 
-Several architectural strategies were considered, including direct local database mirroring through SQLite and the introduction of an object–relational mapping layer. While these approaches provide mechanisms for local persistence, they do not in themselves address the fundamental challenge of synchronizing divergent state between offline and online environments.
+The starting point was a server-authoritative persistence architecture in which all state changes are executed as transactional SQL operations against a centralized cloud backend. While robust in fully online environments, this model assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
 
-To address this challenge, this thesis proposed a command-based replication model inspired by the Command Pattern. Rather than synchronizing complete world snapshots, the system records player intent as serialized commands that can be replayed deterministically against the authoritative server infrastructure. This approach leverages the existing transactional guarantees of the backend while minimizing structural disruption to the current persistence architecture.
+Several architectural strategies were considered. Direct local database mirroring through SQLite provides a familiar persistence interface during offline sessions but does not itself address how divergent state is reconciled upon reconnection. An object--relational mapping layer was also evaluated but rejected due to integration complexity and the risk of disrupting the existing persistence boundary.
 
-The command-based solution offers a balanced trade-off between simplicity and robustness. It preserves the Database Interface abstraction, integrates with both SQL and SQLite backends, and avoids complex state-merging algorithms. At the same time, it introduces requirements for deterministic execution, ordering guarantees, and conflict validation, which must be carefully managed in large-scale multiplayer environments.
+The proposed solution is a command-based replication model. Rather than synchronizing complete world snapshots, the system records player intent as serializable commands that can be replayed deterministically against the authoritative server. This approach addresses the three dimensions of the research question as follows.
 
-Overall, the results suggest that a command-based synchronization model provides a practical and extensible foundation for hybrid offline–online persistence in survival video games. While additional mechanisms for conflict detection, validation, and scalability may be required in production systems, the proposed architecture demonstrates that consistent synchronization can be achieved without fundamentally redesigning the existing server-authoritative framework.
+\textbf{Consistency} is maintained by treating the cloud server as the single authoritative source of truth. Offline commands are not committed until they have been validated and replayed server-side. The existing transactional guarantees of the SQL backend are preserved throughout.
+
+\textbf{Conflict resolution} is handled through a combination of entity versioning, command classification, and per-type resolution policies. Idempotent commands are replayed unconditionally; commutative operations such as resource deltas are merged by summation; and non-commutative operations are validated against current server state before being accepted or rejected. Commands that cannot be applied are returned to the client in a rejection manifest rather than being silently discarded.
+
+\textbf{Scalability} is supported by the architecture's reliance on the existing server-authoritative infrastructure. Because synchronization occurs through ordered command replay rather than full state diffing, the volume of data transmitted on reconnection is proportional to the number of offline actions rather than the total world size.
+
+The approach introduces its own requirements: commands must be deterministic and replay-safe, ordering must be preserved across the command log, and server-side validation logic must cover all command types to prevent exploitation. These constraints are manageable within the scope of the existing architecture but would require careful engineering in a production system.
+
+Overall, the results suggest that a command-based synchronization model provides a practical and extensible foundation for hybrid offline–online persistence in survival video games, and that consistent synchronization can be achieved without fundamentally redesigning the existing server-authoritative framework.
 
 \newpage
 
