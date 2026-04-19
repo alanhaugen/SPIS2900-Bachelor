@@ -25,15 +25,19 @@
 \newpage
 \section*{Abstract}
 
-This bachelor project explores the design of algorithms and data structures that enable seamless transitions between locally hosted and cloud-based gaming sessions in survival video games while maintaining consistent world persistence. The project explores ways to synchronize the world state stored locally with data kept in SQL databases on the cloud for an existing video game.
+This thesis investigates how persistent game state can be synchronized between locally hosted and cloud-based sessions in survival multiplayer games. Server-authoritative architectures provide strong consistency in fully online environments but cannot support offline play, as they depend on continuous connectivity to a centralized SQL backend.
 
-What algorithmic methods can maintain data consistency and address conflicts when synchronizing long-term persistent game states between local and cloud-based sessions in survival video games?
+A command-based replication model is proposed in which player actions are encapsulated as serializable command objects and stored in a local command log during offline sessions. Upon reconnection, commands are replayed sequentially against the authoritative server. Conflict resolution is handled through entity versioning and command classification: idempotent commands are replayed unconditionally, commutative operations are merged by delta summation, and non-commutative operations are validated against current server state. Commands that cannot be applied are returned to the client in a rejection manifest.
+
+The proposed architecture preserves the existing Database Interface abstraction and integrates with both SQL and SQLite backends, enabling hybrid offline–online persistence without fundamentally redesigning the server-authoritative framework.
 
 \section*{Sammendrag}
 
-Dette bachelorprosjektet analyserer hvordan man kan utvikle algoritmer og datastrukturer som legger til rette for en sømløs overgang mellom lokal hosting av spilløkter og skybaserte plattformer i overlevelsesspill. Målet er å sikre at verdenstilstanden forblir konsistent og vedvarende gjennom disse overgangene. Prosjektet undersøker ulike metoder for å synkronisere lokale verdener med skybaserte data lagret i SQL-databaser, spesifikt for et eksisterende videospill.
+Denne oppgaven undersøker hvordan vedvarende spilltilstand kan synkroniseres mellom lokalt hostede og skybaserte økter i overlevelsesbaserte flerspillerspill. Serverautoritære arkitekturer gir sterk konsistens i fullt tilkoblede miljøer, men støtter ikke offline-spill da de krever kontinuerlig tilkobling til en sentralisert SQL-backend.
 
-Hvilke algoritmiske metoder kan bidra til å opprettholde datakonsistens og håndtere konflikter når man synkroniserer lagrede spilltilstander mellom lokalt og skybaserte økter i overlevelsesspill?
+Det foreslås en kommandobasert replikasjonsmodell der spillerhandlinger innkapsles som serialiserbare kommandoobjekter og lagres i en lokal kommandologg under offline-økter. Ved gjenoppkobling spilles kommandoene av sekvensielt mot den autoritative serveren. Konflikthåndtering ivaretas gjennom entitetsversjonering og kommandoklassifisering: idempotente kommandoer spilles alltid av, kommutative operasjoner slås sammen ved deltasummering, og ikke-kommutative operasjoner valideres mot gjeldende servertilstand. Kommandoer som ikke kan anvendes, returneres til klienten i et avvisningsmanifest.
+
+Den foreslåtte arkitekturen bevarer det eksisterende databasegrensesnittet og integreres med både SQL- og SQLite-backends, noe som muliggjør hybrid offline–online persistens uten å fundamentalt redesigne det serverautoritære rammeverket.
 \pagenumbering{roman}
 \newpage
 
@@ -49,11 +53,11 @@ Hvilke algoritmiske metoder kan bidra til å opprettholde datakonsistens og hån
 
 \section{Introduction}
 
-This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs are fitting for a persistent multiplayer world shared by thousands of players. Solutions are designed to support large-scale online survival games which need to store player progression, world state, and faction dynamics. The solutions are not intended to store or transmit ethereal information such as player position or combat related replication, instead only long-term storage data of the kind which can typically be stored in central cloud-hosted SQL databases are of consideration.
+This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs are fitting for a persistent multiplayer world shared by thousands of players. Solutions are designed to support large-scale online survival games which need to store player progression, world state, and faction dynamics. The solutions are not intended to store or transmit ephemeral information such as player position or combat-related replication, instead only long-term storage data of the kind which can typically be stored in central cloud-hosted SQL databases are of consideration.
 
-The suggested designs are intended to provide ways to support both offline and online functionality. Having the ability to make your game run offline is important, as on console platforms access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes while preserving core gameplay mechanics.
+The suggested designs are intended to provide ways to support both offline and online functionality. Having the ability to make a game run offline is important, as on console platforms access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes while preserving core gameplay mechanics.
 
-This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assumes continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite which can later be synchronized with the authoritative cloud-based server infrastructure.
+This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assume continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite which can later be synchronized with the authoritative cloud-based server infrastructure.
 
 Many gamers prefer to play offline, but might want to connect online as they advance in the persistent world. Collaboration with other players is often necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world. Designs that allow users to transition online after initial offline sessions are explored.
 
@@ -67,7 +71,7 @@ Game worlds consist of actors that may own inventory items, buildings, vehicles,
 
 Such systems follow a server-based architecture in which all state-modifying actions are processed through a centralized online infrastructure. Player actions are buffered temporarily before being committed to online servers for persistence. Multiple server instances may run concurrently; however, at any given time, only one server instance should have authoritative control over a specific player. Player actions can be executed as database transactions using SQL on the authoritative server.
 
-One possible approach is to apply the Service Locator pattern to provide separate implementations for the communication service which is responsible for generating and receiving SQL commands. This service is called the Database Interface (DBI) from here on. Rather than generating raw SQL queries directly from the game client, the DBI invokes predefined SQL functions. Each function executes as a transactional unit and can be rolled back if any command within the transaction fails. Consequently, every state-modifying action is encapsulated as an atomic database operation.
+One possible approach is to apply the Service Locator pattern to provide separate implementations for the communication service which is responsible for generating and receiving SQL commands. This service is hereafter referred to as the Database Interface (DBI). Rather than generating raw SQL queries directly from the game client, the DBI invokes predefined SQL functions. Each function executes as a transactional unit and can be rolled back if any command within the transaction fails. Consequently, every state-modifying action is encapsulated as an atomic database operation.
 
 The DBI is designed to support atomicity, consistency, and idempotency. If a failure occurs, or if the system is uncertain whether a transaction completed successfully, the DBI may safely retry the corresponding function without risking duplicate or inconsistent state changes. Additional challenges arise under network partitions or concurrent updates, where conflicting replicas may emerge despite transactional guarantees.
 
@@ -97,8 +101,6 @@ public:
 };
 \end{lstlisting}
 
-%\section{Conflict Resolution Strategies}
-
 \subsection{Limitations of online server-based systems}
 
 Persistence architecture designed in this fashion operates under the assumption of continuous connectivity to a centralized cloud infrastructure. All persistent game state is stored in SQL databases hosted on backend servers, and the system operates under a server-authoritative model in which the cloud acts as the single source of truth.
@@ -111,7 +113,7 @@ The system requires uninterrupted communication between the game client and back
 
 \subsection{Absence of Local Persistence Authority}
 
-In an online server-based current model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during runtime, durable storage is exclusively managed by the cloud infrastructure. This design prevents local world progression in disconnected scenarios and complicates support for local cooperative modes.
+In the current online server-based model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during runtime, durable storage is exclusively managed by the cloud infrastructure. This design prevents local world progression in disconnected scenarios and complicates support for local cooperative modes.
 
 \subsection{Lack of Divergence Handling Mechanisms}
 
@@ -175,15 +177,11 @@ private:
 
 \subsection{Implementation considerations}
 
-This system will have to be designed with integrity guarantees in mind: since commands are generated client-side and stored locally, a malicious client could potentially forge or alter commands before transmission. It must therefore be possible to verify every action on the server before it is committed, and any command that produces an invalid or impossible state transition should be rejected.
+This system must be designed with integrity guarantees in mind. Since commands are generated client-side and stored locally, a malicious client could potentially forge or alter commands before transmission. Every action must therefore be validated on the server before it is committed, and any command that produces an invalid or impossible state transition must be rejected. Conflict detection, entity versioning, and per-type resolution policies are addressed in the following subsection.
 
-\begin{enumerate}
-  \item Ordering guarantees
-  \item Idempotency and duplicate detection
-  \item Conflict detection strategy
-  \item Versioning or vector clocks
-  \item What happens if commands depend on server-side changes
-\end{enumerate}
+Beyond conflict handling, two additional concerns must be managed. First, ordering guarantees: the command log must preserve the sequence in which actions were taken offline, and the server must replay them in that order to ensure deterministic results. Second, idempotency and duplicate detection: if a replay attempt fails partway through or a command is transmitted more than once, the server must be able to identify and skip already-applied commands. The idempotency key stored on each command serves this purpose.
+
+A remaining open concern is command dependency on server-side state that changed during the offline session. If an offline command assumed the existence of an entity that was deleted by another player while the client was disconnected, the command cannot be applied even if its version check would otherwise pass. Handling such cases requires pre-condition checks on the server that go beyond version comparison, and the rejection manifest provides the mechanism for communicating these failures back to the client.
 
 \subsection{Conflict Resolution Strategy}
 
@@ -239,7 +237,7 @@ Commands that fail validation are not silently discarded. Instead, they are coll
 
 \subsection{Integration Possibilities}
 
-Currently, every action that should persist goes through the DBI. By developing the DBI into a factory which produces commands, one can create a system which lets the player either create online commands, which are queued and sent to the server as before, or simply stored on disk and used when a  player connects to the server. 
+Currently, every action that should persist goes through the DBI. By extending the DBI into a factory that produces command objects, the system can be made to route actions in two ways depending on connectivity state: online commands are queued and transmitted to the server immediately as before, while offline commands are serialized and stored on disk, deferred until the player reconnects.
 
 \subsection{Local Persistence via SQLite}
 
@@ -275,7 +273,7 @@ The command-based approach proposed in this thesis represents a middle ground be
 
 Compared to a full object–relational mapping redesign or a distributed consensus-based architecture, the command pattern solution introduces relatively limited structural change to the existing system. It preserves the Database Interface abstraction and integrates naturally with the transactional SQL backend. At the same time, it enables offline progression through local command logging and deferred synchronization.
 
-However, the approach is not without limitations. Command-based replication assumes that operations are deterministic and replay-safe. It also requires careful handling of ordering, idempotency, and potential conflicts when server-side state evolves independently of offline progress. In large-scale multiplayer environments, additional mechanisms such as version tracking or validation checks may be required to ensure consistency.
+However, the approach is not without limitations. Command-based replication assumes that operations are deterministic and replay-safe. The conflict resolution strategy proposed here — entity versioning combined with per-type resolution policies — addresses the common cases, but edge cases remain. Commands that depend on entities deleted by other players during the offline session cannot be recovered by version comparison alone and must be caught by pre-condition checks during server-side validation. In sufficiently large-scale environments, the volume of pending commands and the breadth of pre-condition logic could also introduce replay latency that affects the reconnection experience.
 
 Overall, the proposed architecture aims to balance simplicity, extensibility, and correctness. Rather than introducing a fundamentally new persistence paradigm, it extends the existing transactional model in a way that supports hybrid connectivity while minimizing architectural disruption.
 
