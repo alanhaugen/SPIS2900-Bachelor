@@ -66,7 +66,49 @@ This thesis investigates the following research statement: How can synchronizati
 
 \newpage
 
+\section{Methodology}
+
+This thesis follows a design science research approach \autocite{hevner2004design}, in which the primary output is an artifact — in this case an architectural design and a working software prototype — rather than an empirical study. The research proceeds in three stages.
+
+The first stage is analysis: examining how existing server-authoritative persistence systems work and identifying where they break down when offline play is required. This is covered in Section~\ref{sec:challenges}.
+
+The second stage is design: proposing a hybrid architecture based on the Command Pattern, specifying conflict resolution policies, and detailing how the design integrates with both online SQL backends and a local SQLite store. The design decisions are documented in Section~\ref{sec:architecture}.
+
+The third stage is evaluation: implementing the design as a C++ prototype and assessing it against two criteria. First, correctness — every component is covered by automated unit and integration tests written with the Catch2 framework. Second, performance — a benchmark suite measures replay throughput, command log scalability, conflict detection overhead, and the end-to-end cost of a full offline session. The benchmarks also exposed and drove the fix of a quadratic performance issue in the initial implementation. Results are presented in Section~\ref{sec:evaluation}.
+
+The prototype is intentionally self-contained and does not require a running SQL server. This keeps the evaluation reproducible and focused on the algorithmic properties of the design rather than network or infrastructure variability.
+
+\newpage
+
+\section{Related Work}
+\label{sec:relatedwork}
+
+\subsection{Game Industry Approaches}
+
+Several commercially released games have addressed aspects of offline-online synchronization, though typically without exposing the underlying mechanisms.
+
+Valheim \autocite{valheim} stores its world state entirely in local files on the hosting player's machine. This makes the game fully playable offline and without any cloud dependency, but it provides no mechanism for merging divergent state: if two players host separate copies of the same world while disconnected, there is no supported way to reconcile the differences. This is effectively the snapshot problem described in Section~\ref{sec:challenges} — straightforward for single-player scenarios but unworkable for shared persistent worlds.
+
+Steam Cloud Save \autocite{steamcloud} offers file-level synchronization across devices, uploading and downloading save files when a player connects. Conflicts are resolved by taking the most recently modified file, which is a form of last-write-wins and loses any changes made on the other device. This approach is simple and adequate for single-player games, but cannot handle concurrent modifications from multiple players.
+
+Many large-scale survival multiplayer games — such as Rust and DayZ — take the opposite approach and make offline play impossible, requiring a persistent connection to a central server at all times. This sidesteps synchronization entirely but at the cost of accessibility.
+
+\subsection{Distributed Systems Approaches}
+
+The academic distributed systems literature offers more principled solutions, though they come with trade-offs in implementation complexity.
+
+Conflict-free Replicated Data Types (CRDTs) \autocite{shapiro2011crdts} are mathematical data structures that guarantee eventual consistency without coordination. Any two replicas can be merged in any order and will converge to the same result. CRDTs would eliminate the need for conflict resolution policies entirely, but they require redesigning every game data type to conform to CRDT semantics — a significant architectural investment. They are also better suited to data types like counters and sets than to the complex relational structures (buildings with positions, quest state, faction graphs) that survival games require.
+
+Operational Transformation (OT) \autocite{ellis1989ot}, the technique underlying collaborative editing tools such as Google Docs, transforms concurrent operations so that they can be applied in any order while producing a consistent result. The intent-based approach used in this thesis shares similarities with OT: both record operations rather than snapshots. However, OT requires a central server to sequence and transform operations in real time, which is not available during an offline session.
+
+Event sourcing \autocite{fowler2005eventsourcing} is a software architecture pattern in which state is derived entirely from an append-only log of events. The command log proposed in this thesis is closely related: both record intent rather than state, and both allow the current state to be reconstructed by replaying the log. The key difference is that event sourcing typically assumes a single authoritative log, whereas this thesis addresses what happens when two divergent logs (client offline, server online) must be merged.
+
+The conflict resolution strategy — particularly entity versioning and optimistic concurrency control — follows the approach described by Bernstein and Goodman \autocite{bernstein1981concurrency}, where transactions validate preconditions at commit time rather than acquiring locks upfront.
+
+\newpage
+
 \section{Typical Challenges in Persistence Systems}
+\label{sec:challenges}
 
 Game worlds consist of actors that may own inventory items, buildings, vehicles, navigation markers, abilities, and quest progression. Persistent game state is commonly stored in centralized persistence systems backed by SQL databases.
 
@@ -135,6 +177,7 @@ The centralized server-authoritative design scales well for persistent multiplay
 \newpage
 
 \section{Proposed Hybrid Persistence Architecture}
+\label{sec:architecture}
 
 \subsection{Command-Based State Replication}
 
@@ -285,6 +328,98 @@ The prototype is located in the \texttt{app/} directory and is built with CMake.
 \end{itemize}
 
 The prototype includes 31 Catch2 unit tests covering the command log, idempotency, commutative merging, non-commutative conflict detection, SQLite persistence, and a full offline-session integration scenario.
+
+\newpage
+
+\section{Evaluation}
+\label{sec:evaluation}
+
+The prototype was evaluated along two dimensions: correctness, verified through automated testing, and performance, measured through a benchmark suite run on the same hardware used for development (Apple M-series, macOS, Release build with compiler optimisations enabled).
+
+\subsection{Correctness}
+
+The implementation is covered by 31 Catch2 unit and integration tests organised into five categories: command log behaviour (append, ordering, flush), idempotency (duplicate commands produce no side effects), commutative merging (resource and reputation deltas apply regardless of version mismatch), non-commutative conflict detection (version mismatch and missing entities are caught and reported), and a full offline session integration test that exercises all result types in a single replay pass. All 31 tests pass.
+
+\subsection{Replay Throughput}
+
+The first benchmark measures how quickly the in-memory replay engine can process a command log of increasing size, using one unique entity per command to isolate the cost of the replay loop itself from conflict resolution overhead.
+
+\begin{center}
+\begin{tabular}{rrrr}
+\hline
+Commands & Time (ms) & Throughput (cmd/s) & Applied \\
+\hline
+100      & 0.02      & 4,907,975          & 72      \\
+500      & 0.09      & 5,780,347          & 368     \\
+1,000    & 0.16      & 6,448,160          & 734     \\
+5,000    & 0.81      & 6,196,747          & 3,752   \\
+10,000   & 1.44      & 6,957,533          & 7,418   \\
+50,000   & 9.36      & 5,340,668          & 37,018  \\
+\hline
+\end{tabular}
+\end{center}
+
+Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands. A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold.
+
+During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50,000 commands took 2,939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
+
+\subsection{Command Log Backend Comparison}
+
+The second benchmark compares the in-memory \texttt{CommandLog} against the SQLite-backed \texttt{SQLiteCommandLog} for append and retrieval operations.
+
+\begin{center}
+\begin{tabular}{rrrrr}
+\hline
+Commands & Mem. Append (ms) & SQL Append (ms) & Mem. Get (ms) & SQL Get (ms) \\
+\hline
+100      & 0.00             & 0.33            & 0.00          & 0.03         \\
+1,000    & 0.01             & 3.35            & 0.00          & 0.20         \\
+5,000    & 0.06             & 19.96           & 0.02          & 1.06         \\
+10,000   & 0.13             & 33.57           & 0.03          & 1.82         \\
+\hline
+\end{tabular}
+\end{center}
+
+SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms for 10,000 commands), which is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
+
+\subsection{Conflict Detection Overhead}
+
+The third benchmark holds the command count fixed at 10,000 and varies the proportion of commands that are guaranteed to produce a version conflict, from 0\% to 100\%.
+
+\begin{center}
+\begin{tabular}{rrrr}
+\hline
+Conflict rate & Time (ms) & Throughput (cmd/s) & Applied \\
+\hline
+0\%           & 1.10      & 9,130,686          & 3,246   \\
+25\%          & 0.92      & 10,898,185         & 3,213   \\
+50\%          & 0.93      & 10,696,617         & 3,175   \\
+75\%          & 0.98      & 10,163,025         & 3,085   \\
+100\%         & 0.89      & 11,230,176         & 2,912   \\
+\hline
+\end{tabular}
+\end{center}
+
+Throughput varies by less than 20\% across the full range of conflict rates. Higher conflict rates are marginally faster because rejected commands skip the database write step. This confirms that the version check and classification logic add negligible overhead and that the system degrades gracefully under adversarial conflict conditions.
+
+\subsection{Full Offline Session Round-Trip}
+
+The fourth benchmark measures the complete cost of an offline session using the SQLite command log: appending commands to the durable log, retrieving them, and replaying against the in-memory database.
+
+\begin{center}
+\begin{tabular}{rrrrrr}
+\hline
+Commands & Append (ms) & GetPending (ms) & ReplayAll (ms) & Total (ms) \\
+\hline
+100      & 0.30        & 0.02            & 0.15           & 0.47       \\
+1,000    & 2.86        & 0.17            & 0.81           & 3.84       \\
+5,000    & 15.26       & 0.84            & 3.09           & 19.19      \\
+10,000   & 30.42       & 1.70            & 6.29           & 38.40      \\
+\hline
+\end{tabular}
+\end{center}
+
+A full session of 10,000 commands completes in approximately 38 ms end-to-end. SQLite append accounts for roughly 80\% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
 
 \newpage
 

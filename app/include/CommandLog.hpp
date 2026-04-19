@@ -15,6 +15,7 @@ public:
     void                 Append(const Command& cmd);
     std::vector<Command> GetPending() const;
     void                 MarkFlushed(const std::string& idempotencyKey);
+    void                 MarkFlushedBatch(const std::vector<std::string>& keys);
     std::size_t          PendingCount() const;
 
 private:

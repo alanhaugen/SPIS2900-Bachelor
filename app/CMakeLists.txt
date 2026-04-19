@@ -73,3 +73,11 @@ include(CTest)
 include(Catch)
 catch_discover_tests(offline_sync_tests)
 catch_discover_tests(offline_sync_sqlite_tests)
+
+# ── Benchmarks ────────────────────────────────────────────────────────────────
+add_executable(offline_sync_benchmarks benchmarks/benchmark.cpp)
+target_link_libraries(offline_sync_benchmarks
+    PRIVATE
+        offline_sync_lib
+        offline_sync_sqlite_lib
+)

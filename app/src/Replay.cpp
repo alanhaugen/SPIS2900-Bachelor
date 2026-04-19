@@ -39,22 +39,26 @@ ReplayResult ReplayCommand(const Command& cmd, Database& db,
 RejectionManifest ReplayAll(CommandLog& log, Database& db)
 {
     RejectionManifest manifest;
+    std::vector<std::string> toFlush;
 
-    // Snapshot pending list so MarkFlushed calls don't invalidate iteration.
+    // Snapshot pending list so batch flush does not invalidate iteration.
     std::vector<Command> pending = log.GetPending();
 
     for (const Command& cmd : pending)
     {
         ReplayResult result = ReplayCommand(cmd, db, manifest);
 
-        // Flush definitively resolved commands (applied or duplicate).
+        // Collect keys of definitively resolved commands (applied or duplicate).
         // Conflicted/rejected commands remain in the log for caller inspection.
         if (result == ReplayResult::Committed ||
             result == ReplayResult::Duplicate)
         {
-            log.MarkFlushed(cmd.idempotencyKey);
+            toFlush.push_back(cmd.idempotencyKey);
         }
     }
+
+    // Single O(n) pass to remove all resolved commands from the log.
+    log.MarkFlushedBatch(toFlush);
 
     return manifest;
 }
