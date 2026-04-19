@@ -77,8 +77,24 @@ A SQL-based DBI architecture assumes continuous server connectivity and treats t
 
 While this architecture provides strong consistency guarantees in fully online environments, it inherently depends on centralized authority and does not account for state divergence in disconnected or offline scenarios.
 
-\begin{lstlisting}[caption={DBI interface}]
-    Some source code
+\begin{lstlisting}[language=C++, caption={DBI interface (abstract base class)}]
+class IDatabaseInterface
+{
+public:
+    virtual ~IDatabaseInterface() = default;
+
+    virtual bool CreateBuilding(int32_t playerId, int32_t buildingTypeId,
+                                float posX, float posY, float posZ) = 0;
+    virtual bool DestroyBuilding(int32_t buildingId) = 0;
+
+    virtual bool TransferItem(int32_t fromPlayerId, int32_t toPlayerId,
+                              int32_t itemId, int32_t quantity) = 0;
+
+    virtual bool CompleteQuest(int32_t playerId, int32_t questId) = 0;
+
+    virtual bool UpdateFactionRelation(int32_t factionA, int32_t factionB,
+                                       int32_t relationDelta) = 0;
+};
 \end{lstlisting}
 
 %\section{Conflict Resolution Strategies}
@@ -136,9 +152,30 @@ This approach introduces several advantages:
 
 By storing intent rather than derived state, the system avoids directly merging divergent world snapshots and instead synchronizes through ordered execution of state-modifying operations.
 
+\begin{lstlisting}[language=C++, caption={Command structure and local command log}]
+struct Command
+{
+    std::string   type;             // e.g. "CreateBuilding", "TransferItem"
+    int64_t       timestamp;        // UTC milliseconds at time of action
+    std::string   idempotencyKey;   // UUID to detect duplicate replays
+    std::string   params;           // JSON-serialized action parameters
+};
+
+class CommandLog
+{
+public:
+    void Append(const Command& cmd);
+    std::vector<Command> GetPending() const;
+    void MarkFlushed(const std::string& idempotencyKey);
+
+private:
+    std::vector<Command> m_pending;
+};
+\end{lstlisting}
+
 \subsection{Implementation considerations}
 
-This system will have to be … and it must be possible to verify every action on the server to prevent cheating.
+This system will have to be designed with integrity guarantees in mind: since commands are generated client-side and stored locally, a malicious client could potentially forge or alter commands before transmission. It must therefore be possible to verify every action on the server before it is committed, and any command that produces an invalid or impossible state transition should be rejected.
 
 \begin{enumerate}
   \item Ordering guarantees
