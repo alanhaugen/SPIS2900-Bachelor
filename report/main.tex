@@ -3,6 +3,8 @@
 \usepackage{listings}
 \usepackage{titling}
 \usepackage{parskip}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit}
 \usepackage[
     backend=biber,
     style=apa
@@ -36,7 +38,7 @@ A prototype was built in C++ to validate the design, including a SQLite-backed o
 
 Mange overlevelsesspill lagrer spillverdenen på eksterne servere. Dette gjør det umulig å spille spillet offline, og hvis utvikleren går konkurs mister spillerne tilgang til spillet. Denne oppgaven undersøker hvordan et system kan utvikles som gjør at en kan spille spillet uten internett, og så synkronisere spillverdenen ved å koble seg til en server når en spiller selv ønsker det.
 
-Forslaget er å registrere hver spillerhandling som en kommando, i stedet for å sende ny tilstand direkte til serveren. Mens spilleren er frakoblet, samles disse kommandoene opp lokalt. Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når serverens verden har endret, konflikthåndtering blir viktig. Hvordan skal en spiller som har revet ned den samme bygningen eller inntatt det samme territoriet håndteres. Oppgaven løser dette med en konflikthåndteringsstrategi som klassifiserer kommandoer etter type, noen kan alltid anvendes uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
+Forslaget er å registrere hver spillerhandling som en kommando, i stedet for å sende ny tilstand direkte til serveren. Mens spilleren er frakoblet, samles disse kommandoene opp lokalt. Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når serverens verden har endret seg — konflikthåndtering blir viktig. Hvordan skal det håndteres at en annen spiller har revet ned den samme bygningen eller inntatt det samme territoriet? Oppgaven løser dette med en konflikthåndteringsstrategi som klassifiserer kommandoer etter type, noen kan alltid anvendes uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
 
 En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og en kommandoliste som overlever at spillet plutselig lukkes. 
 \pagenumbering{roman}
@@ -54,7 +56,7 @@ En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og 
 
 \section{Introduction}
 
-This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs are fitting for a persistent multiplayer world shared by thousands of players. Solutions are designed to support large-scale online survival games which need to store player progression, world state, and faction dynamics. The solutions are not intended to store or transmit ephemeral information such as player position or combat-related replication, instead only long-term storage data of the kind which can typically be stored in central cloud-hosted SQL databases are of consideration.
+This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs target persistent multiplayer worlds shared by thousands of players, and are intended to support the storage of player progression, world state, and faction dynamics. They are not concerned with ephemeral information such as player position or real-time combat replication; the focus is on long-term persistent data of the kind typically stored in centralized, cloud-hosted SQL databases.
 
 The suggested designs are intended to provide ways to support both offline and online functionality. Having the ability to make a game run offline is important, as on console platforms access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes while preserving core gameplay mechanics.
 
@@ -197,18 +199,23 @@ By storing intent rather than derived state, the system avoids directly merging 
 \begin{lstlisting}[language=C++, caption={Command structure and local command log}]
 struct Command
 {
-    std::string   type;             // e.g. "CreateBuilding", "TransferItem"
-    int64_t       timestamp;        // UTC milliseconds at time of action
-    std::string   idempotencyKey;   // UUID to detect duplicate replays
-    std::string   params;           // JSON-serialized action parameters
+    std::string type;            // e.g. "CreateBuilding", "ResourceDelta"
+    int64_t     timestamp;       // UTC milliseconds at time of action
+    std::string idempotencyKey;  // UUID to detect duplicate replays
+    std::string entityId;        // ID of the affected entity
+    int32_t     expectedVersion; // entity version at command creation
+    int32_t     delta;           // signed delta for commutative operations
 };
 
 class CommandLog
 {
 public:
-    void Append(const Command& cmd);
+    void                 Append(const Command& cmd);
     std::vector<Command> GetPending() const;
-    void MarkFlushed(const std::string& idempotencyKey);
+    void                 MarkFlushed(const std::string& idempotencyKey);
+    void                 MarkFlushedBatch(
+                             const std::vector<std::string>& keys);
+    std::size_t          PendingCount() const;
 
 private:
     std::vector<Command> m_pending;
@@ -278,6 +285,50 @@ Commands that fail validation are not silently discarded. Instead, they are coll
 \subsection{Integration Possibilities}
 
 Currently, every action that should persist goes through the DBI. By extending the DBI into a factory that produces command objects, the system can be made to route actions in two ways depending on connectivity state: online commands are queued and transmitted to the server immediately as before, while offline commands are serialized and stored on disk, deferred until the player reconnects.
+
+The routing decision is straightforward to implement. A factory function checks connectivity and returns the appropriate DBI implementation:
+
+\begin{lstlisting}[language=C++, caption={Connectivity-aware DBI factory}]
+std::unique_ptr<IDatabaseInterface> CreateDBI(bool isOnline)
+{
+    if (isOnline)
+        return std::make_unique<RemoteSQLDBI>(serverConfig);
+    else
+        return std::make_unique<SQLiteDBI>("offline_state.db");
+}
+\end{lstlisting}
+
+Game code calls DBI methods without knowing which backend is active. When connectivity is restored, the engine drains the durable command log by calling \texttt{ReplayAll}, which submits each queued command to the server in order and returns a \texttt{RejectionManifest} listing any commands that could not be applied.
+
+Figure~\ref{fig:architecture} shows the overall data flow.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    node distance=1.0cm and 1.6cm,
+    box/.style={draw, rounded corners, minimum width=2.8cm, minimum height=0.8cm,
+                align=center, font=\small},
+    arr/.style={-{Stealth[length=4pt]}, thick},
+    dasharr/.style={-{Stealth[length=4pt]}, thick, dashed}
+]
+    \node[box] (game)      {Game Code};
+    \node[box, right=of game] (dbi)  {DBI};
+    \node[box, above right=0.6cm and 1.4cm of dbi] (remote) {Remote SQL\\(online)};
+    \node[box, below right=0.6cm and 1.4cm of dbi] (sqlite) {SQLiteDBI\\+ CommandLog\\(offline)};
+    \node[box, right=4.8cm of dbi] (replay) {ReplayAll};
+    \node[box, right=of replay] (server) {Server};
+    \node[box, below=0.9cm of replay] (manifest) {Rejection\\Manifest};
+
+    \draw[arr] (game)   -- node[above,font=\tiny]{action} (dbi);
+    \draw[arr] (dbi)    -- (remote);
+    \draw[arr] (dbi)    -- (sqlite);
+    \draw[dasharr] (sqlite) -- node[above,font=\tiny]{reconnect} (replay);
+    \draw[arr] (replay) -- (server);
+    \draw[arr] (server) -- node[right,font=\tiny]{result} (manifest);
+\end{tikzpicture}
+\caption{Hybrid persistence architecture: game code interacts only with the DBI; the active implementation is swapped at runtime depending on connectivity.}
+\label{fig:architecture}
+\end{figure}
 
 \subsection{Local Persistence via SQLite}
 
@@ -456,6 +507,22 @@ The evaluation workload was generated synthetically using a uniform random distr
 \subsection{Game Preservation}
 
 Beyond the technical design, offline functionality has an important consequence for the long-term availability of games as cultural artefacts. Games that depend on continuous server connectivity cease to function when the developer shuts down the online service, whether due to bankruptcy, acquisition, or commercial decision. Building in offline capability means that the game remains playable independently of the publisher's infrastructure, which is directly relevant to current policy debates around game preservation \autocite{ross}.
+
+\newpage
+
+\section{Future Work}
+
+Several directions for future investigation emerge from the limitations identified in this thesis.
+
+\textbf{Telemetry-calibrated benchmarks.} The evaluation used synthetically generated command logs with uniform random distributions. Collecting real telemetry from offline gameplay sessions would allow the benchmark parameters — entity access distributions, session lengths, conflict rates — to be calibrated against actual player behaviour. This would give a more reliable picture of expected performance and surface corner cases that synthetic workloads may miss.
+
+\textbf{Production server-side scaling.} The server-side replay was evaluated against an in-memory entity store. A production deployment would run validation against a live SQL database under concurrent load from many clients reconnecting simultaneously. Future work should measure how the validation pipeline scales with database contention, test appropriate transaction isolation levels, and explore batching strategies for the server-side replay endpoint.
+
+\textbf{Network latency modelling.} Replay throughput was measured locally, but in practice the command log is transmitted over a network before server-side validation begins. A more complete evaluation would model round-trip latency and measure how command log size affects reconnection time across different network conditions.
+
+\textbf{Recovery paths for rejected commands.} The current design returns a rejection manifest to the client but does not specify what the game should do with it. A production system would need player-facing flows for communicating which offline actions were declined and offering resolution options — for example, refunding consumed resources or offering equivalent substitute items. Designing these recovery policies in a way that is both technically correct and satisfying to players is a non-trivial game-design problem.
+
+\textbf{Command dependency graphs.} Some commands may depend on earlier commands in the same offline log — for example, building a structure and then upgrading it. If the first command is rejected, the second is also invalid regardless of its version check. Modelling explicit command dependencies would allow the replay engine to reject dependent chains early and produce more informative rejection manifests.
 
 \newpage
 
