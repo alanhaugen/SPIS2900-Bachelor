@@ -26,17 +26,17 @@
 \newpage
 \section*{Abstract}
 
-Many survival games store their world entirely on remote servers. This means they can not play the game offline, and if the developer goes bankrupt or stops the online service, the game is lost forever. This thesis looks at ways to make a system which works both for offline and offline gaming sessions, and which allows users to connect online from an offline session when they feel like it.
+Many survival games store their world entirely on remote servers. This means players cannot progress offline, and if the developer shuts down the online service, the game is lost forever. This thesis investigates ways to design a system that supports both offline and online gameplay, and that allows a player to transition from an offline session to an online one without losing progress.
 
-The core idea is to record each player action as a command rather than immediately sending changes to the server. While offline, these commands queue up locally. When connectivity returns, they are replayed against the authoritative server in order. Conflict resolution becomes a challenge, how should the game respond when another player may have demolished the same building, or claimed the same territory. The thesis addresses this through a conflict resolution strategy that classifies commands by type, some can always be applied regardless of what changed, some need a version check, and some must simply be declined and reported back to the player.
+The core idea is to record each player action as a command rather than immediately sending changes to the server. While offline, these commands queue up locally. When connectivity returns, they are replayed against the authoritative server in order. Conflict resolution is the central challenge: if another player demolished the same building or claimed the same territory during the offline period, the system must decide what to do. This thesis addresses that through a strategy that classifies commands by type — some can always be applied regardless of what changed, some require a version check, and some must be declined and reported back to the player.
 
 A prototype was built in C++ to validate the design, including a SQLite-backed offline database and a durable command log that survives crashes.
 
 \section*{Sammendrag}
 
-Mange overlevelsesspill lagrer spillverdenen på eksterne servere. Dette gjør det umulig å spille spillet offline, og hvis utvikleren går konkurs så mister spillerene tilgang til spillet.  Denne oppgaven undersøker hvordan et system kan utvikles som gjør at en kan spillet spillet uten internett, og så synkronisere spillverdenen ved å koble seg til en online server når en spiller selv ønsker det.
+Mange overlevelsesspill lagrer spillverdenen på eksterne servere. Dette gjør det umulig å spille spillet offline, og hvis utvikleren går konkurs mister spillerne tilgang til spillet. Denne oppgaven undersøker hvordan et system kan utvikles som gjør at en kan spille spillet uten internett, og så synkronisere spillverdenen ved å koble seg til en server når en spiller selv ønsker det.
 
-Forslaget er å registrere hver spillerhandling som et kommando, i stedet for å sende ny tilstand direkte til serveren. Mens spilleren er frakoblet, samles disse kommandoene opp lokalt. Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når serverens verden har endret, konflikthåndtering blir viktig. Hvordan skal en spiller som har revet ned den samme bygningen eller inntatt det samme territoriet håndteres. Oppgaven løser dette med en konflikthåndteringsstrategi som klassifiserer kommandoer etter type, noen kan alltid anvendes uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
+Forslaget er å registrere hver spillerhandling som en kommando, i stedet for å sende ny tilstand direkte til serveren. Mens spilleren er frakoblet, samles disse kommandoene opp lokalt. Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når serverens verden har endret, konflikthåndtering blir viktig. Hvordan skal en spiller som har revet ned den samme bygningen eller inntatt det samme territoriet håndteres. Oppgaven løser dette med en konflikthåndteringsstrategi som klassifiserer kommandoer etter type, noen kan alltid anvendes uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
 
 En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og en kommandoliste som overlever at spillet plutselig lukkes. 
 \pagenumbering{roman}
@@ -177,7 +177,7 @@ A centralized server-authoritative design scales well for persistent multiplayer
 
 \subsection{Command-Based State Replication}
 
-To enable offline progression while preserving compatibility with the existing server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
+To enable offline progression while preserving compatibility with a server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
 
 Rather than directly modifying persistent state in the cloud, player actions are encapsulated as serializable command objects. Each command represents an intention to modify game state (e.g., create building, transfer item, complete quest) along with the necessary parameters to execute the modification.
 
@@ -281,7 +281,7 @@ Currently, every action that should persist goes through the DBI. By extending t
 
 \subsection{Local Persistence via SQLite}
 
-A direct approach to enabling offline functionality is to extend the existing Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote SQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
+A direct approach to enabling offline functionality is to extend the Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote SQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
 
 SQLite is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike other SQL implementations, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
 
@@ -295,7 +295,7 @@ An alternative architectural approach considered was the introduction of an Obje
 
 ORM frameworks are common in higher-level languages such as Python and Java, where reflection and dynamic typing simplify runtime type inspection and schema generation. In contrast, implementing a fully featured ORM in C++ presents additional complexity due to the lack of built-in reflection and the need for explicit type registration and serialization logic.
 
-While an ORM could reduce manual database interaction and potentially simplify persistence logic, several factors limited its suitability for the current project. First, the existing architecture already relies on a stable Database Interface (DBI) abstraction connected to predefined SQL functions. Introducing an ORM would require significant restructuring of this persistence boundary. Second, the project required explicit support for SQLite in offline mode, meaning that any ORM solution would need to maintain compatibility across multiple database backends. Finally, time constraints and integration risks made a full ORM implementation impractical within the scope of this bachelor project.
+While an ORM could reduce manual database interaction and potentially simplify persistence logic, several factors limited its suitability for this project. First, the DBI abstraction connected to predefined SQL functions is already a stable persistence boundary. Introducing an ORM would require significant restructuring of that boundary. Second, the project required explicit support for SQLite in offline mode, meaning that any ORM solution would need to maintain compatibility across multiple database backends. Finally, time constraints and integration risks made a full ORM implementation impractical within the scope of this bachelor project.
 
 For these reasons, the project retained the existing DBI abstraction and instead focused on extending it to support hybrid online–offline persistence rather than replacing it with a generalized object–relational mapping layer.
 
@@ -312,9 +312,9 @@ The prototype is located in the \texttt{app/} directory and is built with CMake.
 \textbf{\texttt{offline\_sync\_lib}} contains the core persistence abstractions:
 \begin{itemize}
   \item \texttt{IDatabaseInterface} — the abstract DBI used by game code, with virtual methods for all persistent game actions.
-  \item \texttt{Command} and \texttt{CommandLog} — the in-memory command queue described in Section~3.1.
+  \item \texttt{Command} and \texttt{CommandLog} — the in-memory command queue described in Section~\ref{sec:architecture}.
   \item \texttt{Database} — a lightweight in-memory entity store used for testing, with version tracking and idempotency key recording.
-  \item \texttt{ReplayCommand} / \texttt{ReplayAll} — the conflict-resolution algorithm from Section~3.3, including the \texttt{RejectionManifest} type.
+  \item \texttt{ReplayCommand} / \texttt{ReplayAll} — the conflict-resolution algorithm from Section~\ref{sec:architecture}, including the \texttt{RejectionManifest} type.
 \end{itemize}
 
 \textbf{\texttt{offline\_sync\_sqlite\_lib}} contains the SQLite-backed implementations:
@@ -355,7 +355,7 @@ Commands & Time (ms) & Throughput (cmd/s) & Applied \\
 \end{tabular}
 \end{center}
 
-Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands. A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold.
+Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands. A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30\% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
 
 During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50,000 commands took 2,939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
 
@@ -465,7 +465,7 @@ This thesis investigated the following research question: How can synchronizatio
 
 The starting point was a server-authoritative persistence architecture in which all state changes are executed as transactional SQL operations against a centralized cloud backend. While robust in fully online environments, this model assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
 
-Several architectural strategies were considered. Direct local database mirroring through SQLite provides a familiar persistence interface during offline sessions but does not itself address how divergent state is reconciled upon reconnection. An object--relational mapping layer was also evaluated but rejected due to integration complexity and the risk of disrupting the existing persistence boundary.
+Several architectural strategies were considered. Direct local database mirroring through SQLite provides a familiar persistence interface during offline sessions but does not itself address how divergent state is reconciled upon reconnection. An object–relational mapping layer was also evaluated but rejected due to integration complexity and the risk of disrupting the existing persistence boundary.
 
 The proposed solution is a command-based replication model. Rather than synchronizing complete world snapshots, the system records player intent as serializable commands that can be replayed deterministically against the authoritative server. This approach addresses the three dimensions of the research question as follows.
 
