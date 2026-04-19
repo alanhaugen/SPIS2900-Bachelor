@@ -7,6 +7,7 @@
     backend=biber,
     style=apa
 ]{biblatex}
+\usepackage{hyperref}
 \addbibresource{references.bib}
 
 \title{\textbf{Bachelor thesis\\ \\Saving the Game:\\Consistent Offline-Cloud State Synchronization in Survival Video Games}\\ \\Lagre spillet:\\Konsistent synkronisering av lokal- og skybasert tilstand i overlevelsesspill\\ \\B2VISIM Bachelor in Game Technology and Simulation\\ \\SPIS2900 Bachelor thesis}
@@ -25,19 +26,19 @@
 \newpage
 \section*{Abstract}
 
-This thesis investigates how persistent game state can be synchronized between locally hosted and cloud-based sessions in survival multiplayer games. Server-authoritative architectures provide strong consistency in fully online environments but cannot support offline play, as they depend on continuous connectivity to a centralized SQL backend.
+Many survival games store their world entirely on remote servers, which means the moment a player loses their internet connection, progress stops. This thesis looks at how that limitation can be overcome — specifically, how a game can keep running offline and then safely merge what happened back into the shared world when the player reconnects.
 
-A command-based replication model is proposed in which player actions are encapsulated as serializable command objects and stored in a local command log during offline sessions. Upon reconnection, commands are replayed sequentially against the authoritative server. Conflict resolution is handled through entity versioning and command classification: idempotent commands are replayed unconditionally, commutative operations are merged by delta summation, and non-commutative operations are validated against current server state. Commands that cannot be applied are returned to the client in a rejection manifest.
+The core idea is to record each player action as a small, self-contained command object rather than immediately writing to the server. While offline, these commands queue up locally. When connectivity returns, they are replayed against the authoritative server in order. The tricky part is deciding what to do when the server's world has moved on in the meantime: another player may have demolished the same building, or claimed the same territory. The thesis addresses this through a conflict resolution strategy that classifies commands by type — some can always be applied regardless of what changed, some need a version check, and some must simply be declined and reported back to the player.
 
-The proposed architecture preserves the existing Database Interface abstraction and integrates with both SQL and SQLite backends, enabling hybrid offline–online persistence without fundamentally redesigning the server-authoritative framework.
+A prototype was built in C++ to validate the design, including a SQLite-backed offline database and a durable command log that survives crashes. All components are tested with 31 automated tests.
 
 \section*{Sammendrag}
 
-Denne oppgaven undersøker hvordan vedvarende spilltilstand kan synkroniseres mellom lokalt hostede og skybaserte økter i overlevelsesbaserte flerspillerspill. Serverautoritære arkitekturer gir sterk konsistens i fullt tilkoblede miljøer, men støtter ikke offline-spill da de krever kontinuerlig tilkobling til en sentralisert SQL-backend.
+Mange overlevelsesspill lagrer hele spillverdenen på eksterne servere, noe som betyr at fremgangen stopper i det øyeblikket spilleren mister internettforbindelsen. Denne oppgaven undersøker hvordan den begrensningen kan overkommes — nærmere bestemt hvordan et spill kan fortsette å kjøre uten nett og deretter trygt slå sammen det som skjedde med den delte verdenen når spilleren kobler seg til igjen.
 
-Det foreslås en kommandobasert replikasjonsmodell der spillerhandlinger innkapsles som serialiserbare kommandoobjekter og lagres i en lokal kommandologg under offline-økter. Ved gjenoppkobling spilles kommandoene av sekvensielt mot den autoritative serveren. Konflikthåndtering ivaretas gjennom entitetsversjonering og kommandoklassifisering: idempotente kommandoer spilles alltid av, kommutative operasjoner slås sammen ved deltasummering, og ikke-kommutative operasjoner valideres mot gjeldende servertilstand. Kommandoer som ikke kan anvendes, returneres til klienten i et avvisningsmanifest.
+Kjerneide en er å registrere hver spillerhandling som et lite, selvstendig kommandoobjekt i stedet for å skrive direkte til serveren. Mens spilleren er frakoblet, samles disse kommandoene opp lokalt. Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når serverens verden har endret seg i mellomtiden: en annen spiller kan ha revet ned den samme bygningen eller inntatt det samme territoriet. Oppgaven løser dette gjennom en konflikthåndteringsstrategi som klassifiserer kommandoer etter type — noen kan alltid anvendes uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
 
-Den foreslåtte arkitekturen bevarer det eksisterende databasegrensesnittet og integreres med både SQL- og SQLite-backends, noe som muliggjør hybrid offline–online persistens uten å fundamentalt redesigne det serverautoritære rammeverket.
+En prototype ble bygget i C++ for å validere designet, inkludert en SQLite-basert frakoblet database og en holdbar kommandologg som overlever krasj. Alle komponenter er testet med 31 automatiserte tester.
 \pagenumbering{roman}
 \newpage
 
@@ -258,6 +259,32 @@ ORM frameworks are common in higher-level languages such as Python and Java, whe
 While an ORM could reduce manual database interaction and potentially simplify persistence logic, several factors limited its suitability for the current project. First, the existing architecture already relies on a stable Database Interface (DBI) abstraction connected to predefined SQL functions. Introducing an ORM would require significant restructuring of this persistence boundary. Second, the project required explicit support for SQLite in offline mode, meaning that any ORM solution would need to maintain compatibility across multiple database backends. Finally, time constraints and integration risks made a full ORM implementation impractical within the scope of this bachelor project.
 
 For these reasons, the project retained the existing DBI abstraction and instead focused on extending it to support hybrid online–offline persistence rather than replacing it with a generalized object–relational mapping layer.
+
+\subsection{Prototype Implementation}
+
+A self-contained C++ prototype of the proposed architecture was developed alongside this thesis and is available at:
+
+\begin{center}
+\url{https://github.com/alanhaugen/SPIS2900-Bachelor}
+\end{center}
+
+The prototype is located in the \texttt{app/} directory and is built with CMake. It depends only on Catch2, which is fetched automatically at configure time, and a system SQLite3 library. The implementation is organized as two libraries:
+
+\textbf{\texttt{offline\_sync\_lib}} contains the core persistence abstractions:
+\begin{itemize}
+  \item \texttt{IDatabaseInterface} — the abstract DBI used by game code, with virtual methods for all persistent game actions.
+  \item \texttt{Command} and \texttt{CommandLog} — the in-memory command queue described in Section~3.1.
+  \item \texttt{Database} — a lightweight in-memory entity store used for testing, with version tracking and idempotency key recording.
+  \item \texttt{ReplayCommand} / \texttt{ReplayAll} — the conflict-resolution algorithm from Section~3.3, including the \texttt{RejectionManifest} type.
+\end{itemize}
+
+\textbf{\texttt{offline\_sync\_sqlite\_lib}} contains the SQLite-backed implementations:
+\begin{itemize}
+  \item \texttt{SQLiteDBI} — a concrete implementation of \texttt{IDatabaseInterface} that stores game state in a local SQLite file. It maintains game-domain tables for buildings, item inventories, completed quests, and faction relations. Item transfers execute inside an explicit SQLite transaction and are rejected atomically if the sender has insufficient inventory. Quest completion uses \texttt{INSERT OR IGNORE} to preserve idempotency. Faction relation updates use an UPSERT to accumulate signed deltas.
+  \item \texttt{SQLiteCommandLog} — a durable replacement for the in-memory \texttt{CommandLog} that writes each command to a SQLite file before returning. The \texttt{idempotency\_key} column carries a \texttt{UNIQUE} constraint so that a double-append is silently discarded at the database level. Commands survive process restarts and can be recovered on next open.
+\end{itemize}
+
+The prototype includes 31 Catch2 unit tests covering the command log, idempotency, commutative merging, non-commutative conflict detection, SQLite persistence, and a full offline-session integration scenario.
 
 \newpage
 
