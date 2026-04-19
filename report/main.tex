@@ -484,6 +484,30 @@ Commands & Append (ms) & GetPending (ms) & ReplayAll (ms) & Total (ms) \\
 
 A full session of 10,000 commands completes in approximately 38 ms end-to-end. SQLite append accounts for roughly 80\% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
 
+\subsection{Command Log Disk Footprint}
+
+The fifth benchmark measures how much disk space the SQLite-backed command log consumes as a function of log size. Commands are generated with UUID-length idempotency keys (36 characters) to reflect realistic production identifiers. File size is measured after the database connection is closed, including any WAL file that was not checkpointed.
+
+\begin{center}
+\begin{tabular}{rrr}
+\hline
+Commands & File size (KB) & Bytes per command \\
+\hline
+100      & 32.0           & 327.7 \\
+500      & 80.0           & 163.8 \\
+1,000    & 140.0          & 143.4 \\
+5,000    & 628.0          & 128.6 \\
+10,000   & 1,248.0        & 127.8 \\
+\hline
+\end{tabular}
+\end{center}
+
+The per-command cost stabilizes at approximately 128 bytes for logs of 1,000 commands or more. This overhead has two components: the raw data content of each row (idempotency key at 36 bytes, type string at approximately 13 bytes, entity ID, two integers, and timestamp — roughly 75 bytes in total) and SQLite's structural overhead from the B-tree page layout and the secondary index on the \texttt{idempotency\_key} column, which adds approximately 50 bytes per row.
+
+The high per-command cost at small log sizes (327 bytes at 100 commands) is a consequence of SQLite's fixed page size of 4 KB: even a single-row database occupies at least two pages — one for the data table and one for the unique index. Once the log grows large enough to fill pages efficiently the overhead drops to the steady-state figure.
+
+In practical terms, a 1,000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10,000 commands occupies approximately 1.2 MB. These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
+
 \newpage
 
 \section{Discussion}

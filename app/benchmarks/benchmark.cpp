@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <random>
@@ -274,6 +275,66 @@ static void BenchSQLiteFullReplay()
     }
 }
 
+// ── Experiment 5: SQLite command log disk footprint ───────────────────────────
+static void BenchDiskFootprint()
+{
+    std::cout << "\n=== Experiment 5: SQLite command log disk footprint ===\n";
+    std::cout << std::left
+              << std::setw(12) << "Commands"
+              << std::setw(18) << "File size (KB)"
+              << "Bytes per command\n";
+    std::cout << std::string(50, '-') << "\n";
+
+    // Use realistic UUID-length idempotency keys (36 chars) and typical
+    // entity IDs so the measured sizes reflect production use.
+    auto makeKey = [](int i) -> std::string {
+        // Zero-padded 36-char string that mimics UUID length
+        char buf[37];
+        std::snprintf(buf, sizeof(buf), "%036d", i);
+        return std::string(buf);
+    };
+
+    std::mt19937 rng(77);
+    const int entityCount = 200;
+
+    for (int count : {100, 500, 1000, 5000, 10000})
+    {
+        auto cmds = GenerateCommands(count, entityCount, 0.0, rng);
+        // Replace the short "key-N" keys with UUID-length equivalents
+        for (int i = 0; i < count; ++i)
+            cmds[i].idempotencyKey = makeKey(i);
+
+        const std::string tmpPath = "/tmp/bench_footprint_" + std::to_string(count) + ".db";
+        std::filesystem::remove(tmpPath);
+        std::filesystem::remove(tmpPath + "-wal");
+        std::filesystem::remove(tmpPath + "-shm");
+
+        {
+            SQLiteCommandLog sqlLog(tmpPath);
+            for (const auto& c : cmds) sqlLog.Append(c);
+        } // destructor closes the DB, flushing WAL
+
+        uintmax_t bytes = 0;
+        if (std::filesystem::exists(tmpPath))
+            bytes += std::filesystem::file_size(tmpPath);
+        // WAL file may exist if checkpoint did not run
+        if (std::filesystem::exists(tmpPath + "-wal"))
+            bytes += std::filesystem::file_size(tmpPath + "-wal");
+
+        double kb  = bytes / 1024.0;
+        double bpc = (count > 0) ? static_cast<double>(bytes) / count : 0.0;
+
+        std::cout << std::left
+                  << std::setw(12) << count
+                  << std::setw(18) << std::fixed << std::setprecision(1) << kb
+                  << std::fixed << std::setprecision(1) << bpc << "\n";
+
+        std::filesystem::remove(tmpPath);
+        std::filesystem::remove(tmpPath + "-wal");
+        std::filesystem::remove(tmpPath + "-shm");
+    }
+}
+
 int main()
 {
     std::cout << "OfflineSync Benchmark Suite\n";
@@ -283,6 +344,7 @@ int main()
     BenchCommandLogBackends();
     BenchConflictRate();
     BenchSQLiteFullReplay();
+    BenchDiskFootprint();
 
     std::cout << "\nDone.\n";
     return 0;
