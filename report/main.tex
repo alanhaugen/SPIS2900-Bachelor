@@ -55,6 +55,14 @@ Mange overlevelsesspill lagrer spillverdenen på eksterne servere. Dette gjør d
 Denne bacheloren foreslår en metode som går ut på å loggføre hver spillerhandling som kommandoer (Command-pattern), i stedet for å sende ny tilstand direkte til serveren. Mens spilleren spiller frakoblet, samles disse kommandoene opp lokalt i en kø (queue datastruktur). Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når ved konflikter: for eksempel, hva skjer når annen spiller har revet ned den samme bygningen eller inntatt det samme territoriet mens en spilte frakoblet? Denne bacherloroppgaven foreslår konflikthåndteringsstrategier som klassifiserer kommandoer etter type: det er kommandoer som alltid utføres uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
 
 En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og en kommandoliste som overlever at spillet plutselig lukkes. 
+\newpage
+
+\section*{Acknowledgements}
+
+I'd like to thank my mentor Tord Sindre Trøen for helping me grow as a programmer and showing me the internal workings of professional game engine development and the workings of a professional game development studio. The patience and understanding has helped me become a better programmer and has made me think deeper and more focused on code reviews and the effects changes have. I have also been introduced to ways of using AI to help speed up code production and how to think critically about the code that is produced.
+
+I would also like to thank my advisor at the University of Inland Norway, Ole Einar Flaten. Ole is an academic who teaches 3D programming and game engine development at Hamar, which are my two favorite subjects. Ole has suggested many ways to improve the thesis and has been helpful during the internship with academic suggestions on how to improve this thesis during the period beginning the 15. January and ending 13. May 2026. 
+
 \pagenumbering{roman}
 \newpage
 
