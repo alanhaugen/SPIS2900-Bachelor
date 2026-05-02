@@ -1,5 +1,6 @@
 \glossaryentry{idempotency?\glossentry{idempotency}|setentrycounter[]{page}"\glsnumberformat}{5}
 \glossaryentry{ACID?\glossentry{acid}|setentrycounter[]{page}"\glsnumberformat}{24}
+\glossaryentry{Atomicity?\glossentry{atomicity}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{Battle.net?\glossentry{battlenet}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{B-tree?\glossentry{btree}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{Catch2?\glossentry{catch2}|setentrycounter[]{page}"\glsnumberformat}{24}
@@ -14,6 +15,8 @@
 \glossaryentry{event sourcing?\glossentry{eventsourcing}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{idempotency?\glossentry{idempotency}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{idempotency key?\glossentry{idempotencykey}|setentrycounter[]{page}"\glsnumberformat}{24}
+\glossaryentry{Monotonically?\glossentry{Monotonically}|setentrycounter[]{page}"\glsnumberformat}{24}
+\glossaryentry{Mutex lock?\glossentry{mutex}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{non-commutative operation?\glossentry{noncommutative}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{OCC?\glossentry{occ}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{ORM?\glossentry{orm}|setentrycounter[]{page}"\glsnumberformat}{24}
@@ -24,5 +27,6 @@
 \glossaryentry{Service Locator?\glossentry{servicelocator}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{SQLite?\glossentry{sqlite}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{Steam Cloud Save?\glossentry{steamcloud}|setentrycounter[]{page}"\glsnumberformat}{24}
+\glossaryentry{Telemetry?\glossentry{telemetry}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{WAL?\glossentry{wal}|setentrycounter[]{page}"\glsnumberformat}{24}
 \glossaryentry{UUID?\glossentry{uuid}|setentrycounter[]{page}"\glsnumberformat}{24}

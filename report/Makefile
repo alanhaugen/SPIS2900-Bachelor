@@ -1,6 +1,6 @@
 .PHONY: clean
 
-main.pdf: main.tex references.bib
+main.pdf: main.tex references.bib glossary.tex
 	pdflatex main
 	biber main
 	makeglossaries main

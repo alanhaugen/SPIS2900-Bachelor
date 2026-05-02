@@ -89,7 +89,7 @@ The suggested design is intended to provide a way to support both offline and on
 
 This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assume continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite which can later be synchronized with the authoritative cloud-based server infrastructure.
 
-Many gamers prefer to play offline, but might want to connect online as they advance in the persistent world. Collaboration with other players is often necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world. Designs that allow users to transition online after initial offline sessions are explored.
+Many gamers prefer to play offline, but might want to connect online as they advance in the persistent world. Collaboration with other players is often necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world \autocite{CERE2021105}. Designs that allow users to transition online after initial offline sessions are explored.
 
 The following research statement is investigated: How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?
 
@@ -132,7 +132,7 @@ Operational Transformation (OT) \autocite{ellis1989ot}, the technique underlying
 
 Event sourcing \autocite{fowler2005eventsourcing} is a software architecture pattern in which state is derived entirely from an append-only log of events. The command log proposed in this thesis is closely related: both record intent rather than state, and both allow the current state to be reconstructed by replaying the log. The key difference is that event sourcing typically assumes a single authoritative log, whereas this thesis addresses what happens when two divergent logs (client offline, server online) must be merged.
 
-The conflict resolution strategy — particularly entity versioning and optimistic concurrency control — follows the approach described by Bernstein and Goodman \autocite{bernstein1981concurrency}, where transactions validate preconditions at commit time rather than acquiring locks upfront.
+The conflict resolution strategy — particularly entity versioning and optimistic concurrency control — follows the approach described by Bernstein and Goodman \autocite{bernstein1981concurrency}, where transactions validate preconditions at commit time rather than acquiring locks upfront. In computer science, locks known as mutexes are used to ensure that two threads or computers do not change the same data at the same time. By not using locks, or mutexes, the system will work even when offline.
 
 \newpage
 

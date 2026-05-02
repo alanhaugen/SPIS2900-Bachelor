@@ -3,6 +3,11 @@
     description={Atomicity, Consistency, Isolation, Durability — the four properties that guarantee database transactions are processed reliably even in the event of errors, power failures, or concurrent access}
 }
 
+\newglossaryentry{atomicity}{
+    name={Atomicity},
+    description={Atomicity is a fundamental database principle ensuring transactions are treated as single, indivisible "all-or-nothing" units}
+}
+
 \newglossaryentry{battlenet}{
     name={Battle.net},
     description={Blizzard Entertainment's online gaming platform and authentication infrastructure, required for connectivity in all modern Blizzard titles}
@@ -73,6 +78,18 @@
     description={A unique identifier (typically a UUID) attached to each command; the server uses it to detect and silently skip commands that have already been applied, enabling safe re-transmission after network failures}
 }
 
+\newglossaryentry{Monotonically}{
+    name={Monotonically},
+    description={Monotonically describes a process, function, or sequence that changes in only one direction—consistently increasing or consistently decreasing without reversing direction} 
+}
+
+
+\newglossaryentry{mutex}{
+    name={Mutex lock},
+    description={In computer science, a lock or mutex (from mutual exclusion) is a synchronization primitive that prevents state from being modified or accessed by multiple threads of execution at once}
+}
+
+
 \newglossaryentry{noncommutative}{
     name={non-commutative operation},
     description={An operation whose result depends on the order in which it is applied; in this thesis, destructive or positional operations such as demolishing a building or placing a structure that must be validated against current server state before being accepted}
@@ -121,6 +138,11 @@
 \newglossaryentry{steamcloud}{
     name={Steam Cloud Save},
     description={Valve's file-level save synchronization service, which uploads and downloads save files when a player connects; conflicts are resolved by last-write-wins, discarding any changes made on the other device}
+}
+
+\newglossaryentry{telemetry}{
+    name={Telemetry},
+    description={Telemetry is the automated collection and transmission of data and measurements from distributed or remote sources to a central system for monitoring, analysis and resource optimization}
 }
 
 \newglossaryentry{wal}{
