@@ -1,0 +1,134 @@
+\newglossaryentry{acid}{
+    name={ACID},
+    description={Atomicity, Consistency, Isolation, Durability — the four properties that guarantee database transactions are processed reliably even in the event of errors, power failures, or concurrent access}
+}
+
+\newglossaryentry{battlenet}{
+    name={Battle.net},
+    description={Blizzard Entertainment's online gaming platform and authentication infrastructure, required for connectivity in all modern Blizzard titles}
+}
+
+\newglossaryentry{btree}{
+    name={B-tree},
+    description={A self-balancing tree data structure that keeps data sorted and allows searches, insertions, and deletions in logarithmic time; the primary index structure used internally by SQLite}
+}
+
+\newglossaryentry{catch2}{
+    name={Catch2},
+    description={A header-based C++ unit testing framework that provides test case macros, assertions, and test discovery without requiring a separate test runner}
+}
+
+\newglossaryentry{cmake}{
+    name={CMake},
+    description={A cross-platform build system generator that produces native build files (Makefiles, Xcode projects, Visual Studio solutions) from a platform-independent description}
+}
+
+\newglossaryentry{commandlog}{
+    name={command log},
+    description={A durable, ordered sequence of command objects representing player actions recorded during an offline session; the primary artifact used to synchronize client state with the authoritative server on reconnection}
+}
+
+\newglossaryentry{commandpattern}{
+    name={Command Pattern},
+    description={A software design pattern in which each action or request is encapsulated as a self-contained object, enabling serialization, queuing, logging, and replay of operations}
+}
+
+\newglossaryentry{commutative}{
+    name={commutative operation},
+    description={An operation whose result is independent of the order in which it is applied relative to other operations; in this thesis, additive operations such as resource and reputation deltas that can be merged by summation}
+}
+
+\newglossaryentry{crdt}{
+    name={CRDT},
+    description={Conflict-free Replicated Data Type — a mathematical data structure designed so that any two replicas can be merged in any order and will converge to the same result, guaranteeing eventual consistency without coordination}
+}
+
+\newglossaryentry{dbi}{
+    name={DBI},
+    description={Database Interface — the abstract layer between game code and the underlying persistence backend; all state-modifying game actions are routed through the DBI, which can be swapped at runtime to target different backends}
+}
+
+\newglossaryentry{designscience}{
+    name={Design Science Research},
+    description={A research methodology in which the primary output is an artifact — such as an architectural design or a working software prototype — rather than an empirical study; introduced by Hevner et al.\ (2004)}
+}
+
+\newglossaryentry{entityversioning}{
+    name={entity versioning},
+    description={A mechanism that assigns each persistent entity a monotonically increasing version number, incremented on every committed state change; used to detect whether an entity was modified between the time a command was generated and the time it is replayed}
+}
+
+\newglossaryentry{eventsourcing}{
+    name={event sourcing},
+    description={A software architecture pattern in which all changes to application state are stored as an append-only sequence of events, allowing the current state to be reconstructed by replaying the event log from the beginning}
+}
+
+\newglossaryentry{idempotency}{
+    name={idempotency},
+    description={The property of an operation whereby applying it multiple times produces the same result as applying it once; essential for safe retry logic and duplicate detection in distributed systems}
+}
+
+\newglossaryentry{idempotencykey}{
+    name={idempotency key},
+    description={A unique identifier (typically a UUID) attached to each command; the server uses it to detect and silently skip commands that have already been applied, enabling safe re-transmission after network failures}
+}
+
+\newglossaryentry{noncommutative}{
+    name={non-commutative operation},
+    description={An operation whose result depends on the order in which it is applied; in this thesis, destructive or positional operations such as demolishing a building or placing a structure that must be validated against current server state before being accepted}
+}
+
+\newglossaryentry{occ}{
+    name={OCC},
+    description={Optimistic Concurrency Control — a concurrency strategy in which transactions proceed without acquiring locks, but validate that their preconditions still hold at commit time; conflicts cause the transaction to be rejected rather than blocked}
+}
+
+\newglossaryentry{orm}{
+    name={ORM},
+    description={Object-Relational Mapping — a layer that translates between in-memory objects and relational database rows, allowing persistent entities to be stored and retrieved without writing explicit SQL}
+}
+
+\newglossaryentry{ot}{
+    name={Operational Transformation},
+    description={A technique for reconciling concurrent edits by transforming operations so that they can be applied in any order while producing a consistent result; the mechanism underlying collaborative editing tools such as Google Docs}
+}
+
+\newglossaryentry{rejectionmanifest}{
+    name={rejection manifest},
+    description={A data structure returned to the client after a replay pass, listing each command that could not be applied along with the reason for rejection and the current server-side state of the affected entity}
+}
+
+\newglossaryentry{replay}{
+    name={replay},
+    description={The process of re-executing a sequence of commands against an authoritative data store in order to synchronize state; in this thesis, the mechanism by which offline commands are submitted to the server on reconnection}
+}
+
+\newglossaryentry{serverauthoritative}{
+    name={server-authoritative architecture},
+    description={A system design in which the server is the single source of truth for all persistent state; all state-modifying actions are validated and committed server-side, and the client cannot unilaterally alter authoritative data}
+}
+
+\newglossaryentry{servicelocator}{
+    name={Service Locator},
+    description={A software design pattern that provides a centralized registry through which components can obtain references to services (such as a database interface) at runtime, without being coupled to specific implementations}
+}
+
+\newglossaryentry{sqlite}{
+    name={SQLite},
+    description={An embedded, serverless, ACID-compliant relational database engine implemented as a C library; it stores an entire database in a single file on disk and runs within the host process, requiring no separate server}
+}
+
+\newglossaryentry{steamcloud}{
+    name={Steam Cloud Save},
+    description={Valve's file-level save synchronization service, which uploads and downloads save files when a player connects; conflicts are resolved by last-write-wins, discarding any changes made on the other device}
+}
+
+\newglossaryentry{wal}{
+    name={WAL},
+    description={Write-Ahead Logging — a SQLite journal mode in which changes are written to a separate log file before being applied to the main database, improving concurrent read performance and crash recovery}
+}
+
+\newglossaryentry{uuid}{
+    name={UUID},
+    description={Universally Unique Identifier — a 128-bit identifier standardized in RFC 4122, typically represented as a 36-character hyphen-separated hexadecimal string; used as idempotency keys to uniquely identify each command}
+}

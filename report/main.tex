@@ -10,6 +10,9 @@
     backend=biber,
     style=apa
 ]{biblatex}
+\usepackage[toc, nonumberlist]{glossaries}
+\makeglossaries
+\input{glossary}
 \usepackage{hyperref}
 
 \lstset{
@@ -42,7 +45,7 @@
 \newpage
 \section*{Abstract}
 
-Many survival games store their world entirely on remote servers. This means players cannot progress offline, and if the developer shuts down the online service, the game is lost forever. This thesis investigates ways to design a system that supports both offline and online gameplay, and that allows a player to transition from an offline session to an online one without losing progress.
+Many survival games store their world entirely on remote servers. This means players cannot progress offline, and if the developer shuts down the online service, the game is lost forever. This thesis considers ways to design a system that supports both offline and online gameplay, and that allows a player to transition from an offline session to an online one without losing progress.
 
 The main point is to log each player action in the form of a command instead of making the changes live on the server immediately. When the player is offline, the commands accumulate in a local queue. As soon as the connection is re-established, these commands are executed on the authoritative server in the same order. The biggest issue is how to reconcile conflicts: for example, if during the period of being offline, the building that a player intended to demolish was destroyed by another player, or the same territory was grabbed by another player, etc. then the system needs to figure out how to handle such situations. This thesis proposes a solution that divides commands into categories: there are commands that can always be executed irrespective of changes, some need a version check, and some still have to be rejected and communicated to the player.
 
@@ -52,7 +55,7 @@ A prototype was built in C++ to validate the design, including a SQLite-backed o
 
 Mange overlevelsesspill lagrer spillverdenen på eksterne servere. Dette gjør det umulig å spille spillet offline, og hvis utvikleren går konkurs mister spillerne tilgang til spillet. Denne oppgaven undersøker hvordan et system kan utvikles som gjør at en kan spille spillet uten internett, og så synkronisere spillverdenen ved å koble seg til en server når en spiller selv ønsker det.
 
-Denne bacheloren foreslår en metode som går ut på å loggføre hver spillerhandling som kommandoer (Command-pattern), i stedet for å sende ny tilstand direkte til serveren. Mens spilleren spiller frakoblet, samles disse kommandoene opp lokalt i en kø (queue datastruktur). Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje når ved konflikter: for eksempel, hva skjer når annen spiller har revet ned den samme bygningen eller inntatt det samme territoriet mens en spilte frakoblet? Denne bacherloroppgaven foreslår konflikthåndteringsstrategier som klassifiserer kommandoer etter type: det er kommandoer som alltid utføres uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
+Denne bacheloren foreslår en metode som går ut på å loggføre hver spillerhandling som kommandoer (Command-pattern), i stedet for å sende ny tilstand direkte til serveren. Mens spilleren spiller frakoblet, samles disse kommandoene opp lokalt i en kø (queue datastruktur). Når forbindelsen er gjenopprettet, spilles de av mot den autoritative serveren i riktig rekkefølge. Det vanskelige er å avgjøre hva som skal skje ved konflikter: for eksempel, hva skjer når annen spiller har revet ned den samme bygningen eller inntatt det samme territoriet mens en spilte frakoblet? Denne bacherloroppgaven foreslår konflikthåndteringsstrategier som klassifiserer kommandoer etter type: det er kommandoer som alltid utføres uavhengig av hva som har endret seg, andre krever en versjonssjekk, og noen må rett og slett avvises og rapporteres tilbake til spilleren.
 
 En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og en kommandoliste som overlever at spillet plutselig lukkes. 
 \pagenumbering{roman}
@@ -60,7 +63,9 @@ En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og 
 
 \section*{Acknowledgements}
 
-I would like to thank my mentor, Tord Sindre Trøen, for helping me grow as a programmer and for giving me insight into the inner workings of professional game engine development and studio practices. His patience and guidance have strengthened my ability to think critically about code, particularly in the context of code reviews and the broader impact of technical changes. He also introduced me to effective ways of using AI to support code production, while maintaining a critical perspective on the generated results. In addition, he emphasized the importance of seeking help when needed and reaching out to others with prior experience in the systems I work with —- advice that has reinforced similar guidance I have received from mentors in the past.
+I would like to thank my mentor, Tord Sindre Trøen, for helping me grow as a programmer and for giving me insight into the inner workings of professional game engine development and studio practices. His patience and guidance have strengthened my ability to think critically about code, particularly in the context of code reviews and the broader impact of technical changes. He also introduced me to effective ways of using AI to support code production, while maintaining a critical perspective on the generated results. In addition, he emphasized the importance of seeking help when needed and reaching out to others with prior experience in the systems I work with — advice that has reinforced similar guidance I have received from mentors in the past.
+
+I would also like to thank Maria Esperanza Johnson for her continued support throughout the course. I am grateful to Andreas Aasom Brandsnes, who has been an excellent collaborator and a kind friend on past projects. I would further like to thank Håvard Vibekko at the University of Inland Norway, Fredrik Martol at Funcom, and the Funcom Core Engine Team for giving me the opportunity to experience game development within a cutting-edge studio environment.
 
 I would also like to thank my academic advisor at the University of Inland Norway, Ole Einar Flaten, who teaches 3D programming and game engine development—two of my primary areas of interest. His feedback and academic guidance have been invaluable throughout the thesis process, as well as during the internship period from 15 January to 13 May 2026.
 
@@ -78,29 +83,27 @@ I would also like to thank my academic advisor at the University of Inland Norwa
 
 \section{Introduction}
 
-This thesis considers ways to develop the persistence system of a modern large-scale survival multiplayer game. The designs target persistent multiplayer worlds shared by thousands of players, and are intended to support the storage of player progression, world state, and faction dynamics. They are not concerned with ephemeral information such as player position or real-time combat replication; the focus is on long-term persistent data of the kind typically stored in centralized, cloud-hosted SQL databases.
+This investigation considers a way to develop the persistence system of a modern large-scale survival multiplayer game. The design targets persistent multiplayer worlds shared by thousands of players, and are intended to support the storage of player progression, world state, and faction dynamics. The design is not concerned with ephemeral information such as player position or real-time combat replication; the focus is on long-term persistent data of the kind typically stored in centralized, cloud-hosted SQL databases.
 
-The suggested designs are intended to provide ways to support both offline and online functionality. Having the ability to make a game run offline is important, as on console platforms access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes while preserving core gameplay mechanics.
+The suggested design is intended to provide a way to support both offline and online functionality. Having the ability to make a game run offline is important, especially on console platforms where access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes while preserving core gameplay mechanics.
 
 This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assume continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite which can later be synchronized with the authoritative cloud-based server infrastructure.
 
 Many gamers prefer to play offline, but might want to connect online as they advance in the persistent world. Collaboration with other players is often necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world. Designs that allow users to transition online after initial offline sessions are explored.
 
-This thesis investigates the following research statement: How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?
+The following research statement is investigated: How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?
 
 \newpage
 
 \section{Methodology}
 
-This thesis follows a design science research approach \autocite{hevner2004design}, in which the primary output is an artifact — in this case an architectural design and a working software prototype — rather than an empirical study. The research proceeds in three stages.
+A design science research approach \autocite{hevner2004design} has been adopted. In Design Science, the main product of the thesis is an artifact; in this project the artifacts are the architectural design of a save system and the actual implemented software prototype of the artifact. Instead of the empirical study, the software prototype is the main end product of the research.
 
-The first stage is analysis: examining how existing server-authoritative persistence systems work and identifying where they break down when offline play is required. This is covered in Section~\ref{sec:challenges}.
+The research is conducted in three phases. The first stage is analysis: it involves analyzing existing, server authoritative persistence systems and identifying the problems associated with playing offline. This analysis is performed in Section~\ref{sec:challenges}.
 
-The second stage is design: proposing a hybrid architecture based on the Command Pattern, specifying conflict resolution policies, and detailing how the design integrates with both online SQL backends and a local SQLite store. The design decisions are documented in Section~\ref{sec:architecture}.
+Proposal for second stage design: a hybrid architecture derived from the Command Pattern, with conflict resolution, and showing how the design fits together with online SQL backends and a local SQLite store, is proposed. Design decisions are recorded in Section~\ref{sec:architecture}. The third stage is evaluation, implemented in C++, against two requirements.
 
-The third stage is evaluation: implementing the design as a C++ prototype and assessing it against two criteria. First, correctness — every component is covered by automated unit and integration tests written with the Catch2 framework. Second, performance — a benchmark suite measures replay throughput, command log scalability, conflict detection overhead, and the end-to-end cost of a full offline session. The benchmarks also exposed and drove the fix of a quadratic performance issue in the initial implementation. Results are presented in Section~\ref{sec:evaluation}.
-
-The prototype is intentionally self-contained and does not require a running SQL server. This keeps the evaluation reproducible and focused on the algorithmic properties of the design rather than network or infrastructure variability.
+Correctness, where all parts of the design are covered by automated unit and integration tests, written using the Catch2 framework. Performance, where the replay throughput, command log size limits, conflict detection overhead, and the end-to-end cost of a full offline session are measured using a suite of benchmark programs.
 
 \newpage
 
@@ -109,15 +112,17 @@ The prototype is intentionally self-contained and does not require a running SQL
 
 \subsection{Game Industry Approaches}
 
-Several commercially released games have addressed aspects of offline-online synchronization, though typically without exposing the underlying mechanisms.
+Several commercially released games have addressed aspects of offline-online synchronization, though typically without revealing the underlying mechanisms.
 
-Valheim \autocite{valheim} stores its world state entirely in local files on the hosting player's machine. This makes the game fully playable offline and without any cloud dependency, but it provides no mechanism for merging divergent state: if two players host separate copies of the same world while disconnected, there is no supported way to reconcile the differences. This is effectively the snapshot problem described in Section~\ref{sec:challenges} — straightforward for single-player scenarios but unworkable for shared persistent worlds.
+Valheim \autocite{valheim} uses SQLite to store its world state locally on the hosting player's machine. The entire saved game is found in \texttt{world.db}. This makes the game fully playable offline and without any cloud dependency, but it provides no mechanism for merging divergent state: if two players host separate copies of the same world while disconnected, there is no supported way to reconcile the differences. This is effectively the snapshot problem described in Section~\ref{sec:challenges} — straightforward for single-player scenarios but unworkable for shared persistent worlds.
 
 Steam Cloud Save \autocite{steamcloud} offers file-level synchronization across devices, uploading and downloading save files when a player connects. Conflicts are resolved by taking the most recently modified file, which is a form of last-write-wins and loses any changes made on the other device. This approach is simple and adequate for single-player games, but cannot handle concurrent modifications from multiple players.
 
-Many large-scale survival multiplayer games — such as Rust and DayZ — take the opposite approach and make offline play impossible, requiring a persistent connection to a central server at all times. This sidesteps synchronization entirely but at the cost of accessibility.
+World of Warcraft \autocite{wow} is one of the earliest and largest-scale examples of a persistent multiplayer world built on a purely server-authoritative model. All world state — character progression, item ownership, guild dynamics — lives exclusively on Blizzard's servers, making offline play neither supported nor meaningful. When Blizzard shut down legacy vanilla servers in 2016, the entire game history of those worlds was lost to players, illustrating the preservation problem discussed in Section~\ref{sec:discussion} with particular clarity.
 
-\subsection{Distributed Systems Approaches}
+Blizzard Entertainment's Diablo III \autocite{diablo3} required a persistent connection to the Battle.net infrastructure even for solo gameplay, on the grounds that all character state was stored and validated server-side. At launch in 2012 this meant that server overload made the game completely unplayable despite no multiplayer interaction being involved — an incident widely referred to as "Error 37." This illustrates a concrete failure mode of the purely server-authoritative model: availability of the game depends entirely on availability of the developer's infrastructure, regardless of whether the player is interacting with others.
+
+Many large-scale survival multiplayer games — such as Rust and DayZ — take the same approach and make offline play impossible, requiring a persistent connection to a central server at all times. This sidesteps synchronization entirely but at the cost of accessibility.
 
 The academic distributed systems literature offers more principled solutions, though they come with trade-offs in implementation complexity.
 
@@ -140,7 +145,7 @@ Such systems typically follow a server-authoritative architecture in which all s
 
 A common design pattern for this kind of system is to apply the Service Locator pattern to abstract the communication layer responsible for generating and dispatching persistence commands. This abstraction is hereafter referred to as the Database Interface (DBI). Rather than issuing raw SQL queries directly from game code, the DBI invokes predefined server-side functions. Each function executes as a transactional unit and can be rolled back if any step fails, so every state-modifying action is encapsulated as an atomic database operation.
 
-A well-designed DBI supports atomicity, consistency, and idempotency. If a network failure occurs, or if the client is uncertain whether a transaction completed, the DBI can safely retry without risking duplicate or inconsistent state changes. An important structural advantage of this abstraction is that the DBI can be swapped out via the Service Locator pattern: an online session routes calls to the remote SQL backend, while an offline session could route them to a local implementation — the implications of which are explored in Section~\ref{sec:architecture}.
+A well-designed DBI supports atomicity, consistency, and \gls{idempotency}. If a network failure occurs, or if the client is uncertain whether a transaction completed, the DBI can safely retry without risking duplicate or inconsistent state changes. An important structural advantage of this abstraction is that the DBI can be swapped out via the Service Locator pattern: an online session routes calls to the remote SQL backend, while an offline session could route them to a local implementation — the implications of which are explored in Section~\ref{sec:architecture}.
 
 A SQL-based DBI architecture treats the cloud-hosted SQL database as the single authoritative source of truth for all persistent game state. This provides strong consistency guarantees in fully online environments, but it inherently depends on centralized authority and does not account for state divergence in disconnected scenarios.
 
@@ -524,6 +529,7 @@ In practical terms, a 1,000-command offline session — already a large session 
 \newpage
 
 \section{Discussion}
+\label{sec:discussion}
 
 \subsection{Architectural Trade-offs}
 
@@ -560,6 +566,16 @@ The evaluation workload was generated synthetically using a uniform random distr
 \subsection{Game Preservation}
 
 Beyond the technical design, offline functionality has an important consequence for the long-term availability of games as cultural artefacts. Games that depend on continuous server connectivity cease to function when the developer shuts down the online service, whether due to bankruptcy, acquisition, or commercial decision. Building in offline capability means that the game remains playable independently of the publisher's infrastructure, which is directly relevant to current policy debates around game preservation \autocite{ross}.
+
+\subsection{Financial and Environmental Considerations}
+
+Offline capability also has practical consequences for both players and developers that extend beyond technical design.
+
+From the player perspective, accessing online multiplayer on console platforms typically requires a paid subscription — PlayStation Plus, Xbox Game Pass Core, or Nintendo Switch Online. A significant portion of players do not maintain these subscriptions \autocite{onlinegamers}, meaning that an always-online game is simply inaccessible to them at no fault of their own. An offline-capable design removes this financial barrier and broadens the reachable audience without requiring any change to the online multiplayer experience for players who do subscribe.
+
+From the developer perspective, running always-on server infrastructure for a large-scale multiplayer game is expensive. Servers must remain provisioned and operational at all times, regardless of how many players are actually connected, to guarantee immediate availability when players log in. A hybrid architecture reduces this pressure: players who are offline generate no server load, and infrastructure can be scaled closer to active concurrent usage rather than peak theoretical demand.
+
+There is also an environmental dimension. Data centres consumed approximately 200--250 TWh of electricity globally in 2022, accounting for around 1\% of worldwide electricity demand, and this figure is rising as game streaming and always-on services grow \autocite{iea2024datacentres}. Game servers are a component of this footprint. Shifting a portion of computation — particularly single-player or co-operative offline sessions — to local hardware means that energy is consumed only on the player's device, which is already powered for gaming regardless of connectivity. Reducing the volume of server-side transactions per session, even modestly, contributes to a smaller operational footprint over the lifetime of a game.
 
 \newpage
 
@@ -598,6 +614,11 @@ The proposed solution is a command-based replication model. Rather than synchron
 The approach introduces its own requirements: commands must be deterministic and replay-safe, ordering must be preserved across the command log, and server-side validation logic must cover all command types to prevent exploitation. These constraints are manageable within the scope of the existing architecture but would require careful engineering in a production system.
 
 Overall, the results suggest that a command-based synchronization model provides a practical and extensible foundation for hybrid offline–online persistence in survival video games, and that consistent synchronization can be achieved without fundamentally redesigning the existing server-authoritative framework.
+
+\newpage
+
+\glsaddall
+\printglossaries
 
 \newpage
 

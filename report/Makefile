@@ -3,6 +3,7 @@
 main.pdf: main.tex references.bib
 	pdflatex main
 	biber main
+	makeglossaries main
 	pdflatex main
 	pdflatex main
 
