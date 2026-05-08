@@ -329,7 +329,7 @@ Commands that fail validation are not silently discarded. Instead, they are coll
 
 \subsection{Integration Possibilities}
 
-Currently, every action that should persist goes through the DBI. By extending the DBI into a factory that produces command objects, the system can be made to route actions in two ways depending on connectivity state: online commands are queued and transmitted to the server immediately as before, while offline commands are serialized and stored on disk, deferred until the player reconnects.
+In a server-authoritative game, every action that should persist goes through the DBI. By extending the DBI into a factory that produces command objects, the system can route actions in two ways depending on connectivity state: online commands are transmitted to the server immediately, while offline commands are serialized and stored on disk, deferred until the player reconnects.
 
 The routing decision is straightforward to implement. A factory function checks connectivity and returns the appropriate DBI implementation:
 
@@ -593,7 +593,7 @@ The evaluation workload was generated synthetically using a uniform random distr
 
 Beyond the technical design, offline functionality has an important consequence for the long-term availability of games as cultural artefacts. Games that depend on continuous server connectivity cease to function when the developer shuts down the online service, whether due to bankruptcy, acquisition, or commercial decision. Building in offline capability means that the game remains playable independently of the publisher's infrastructure, which is directly relevant to current policy debates around game preservation \autocite{ross}.
 
-\subsection{Financial and Environmental Considerations}
+\subsection{Financial Considerations}
 
 Offline capability also has practical consequences for both players and developers that extend beyond technical design.
 
@@ -601,7 +601,6 @@ From the player perspective, accessing online multiplayer on console platforms t
 
 From the developer perspective, running always-on server infrastructure for a large-scale multiplayer game is expensive. Servers must remain provisioned and operational at all times, regardless of how many players are actually connected, to guarantee immediate availability when players log in. A hybrid architecture reduces this pressure: players who are offline generate no server load, and infrastructure can be scaled closer to active concurrent usage rather than peak theoretical demand.
 
-There is also an environmental dimension. Data centres consumed approximately 200--250 TWh of electricity globally in 2022, accounting for around 1\% of worldwide electricity demand, and this figure is rising as game streaming and always-on services grow \autocite{iea2024datacentres}. Game servers are a component of this footprint. Shifting a portion of computation — particularly single-player or co-operative offline sessions — to local hardware means that energy is consumed only on the player's device, which is already powered for gaming regardless of connectivity. Reducing the volume of server-side transactions per session, even modestly, contributes to a smaller operational footprint over the lifetime of a game.
 
 \newpage
 
