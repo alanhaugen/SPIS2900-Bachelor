@@ -213,7 +213,8 @@ A centralized server-authoritative design scales well for persistent multiplayer
 \section{Proposed Hybrid Persistence Architecture}
 \label{sec:architecture}
 
-%\subsection{Command-Based State Replication}
+\subsection{Command-Based State Replication}
+\label{sec:commandbased}
 
 To enable offline progression while preserving compatibility with a server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software \autocite{gamma1994design} and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
 
@@ -269,6 +270,7 @@ Beyond conflict handling, two additional concerns must be managed. First, orderi
 A remaining open concern is command dependency on server-side state that changed during the offline session. If an offline command assumed the existence of an entity that was deleted by another player while the client was disconnected, the command cannot be applied even if its version check would otherwise pass. Handling such cases requires pre-condition checks on the server that go beyond version comparison, and the rejection manifest provides the mechanism for communicating these failures back to the client.
 
 \subsection{Conflict Resolution Strategy}
+\label{sec:conflictresolution}
 
 When offline commands are replayed against the authoritative server, conflicts arise when the server state has diverged from the state against which those commands were originally generated. A command that was valid at the time of creation may produce an invalid or inconsistent state transition when applied to an evolved world.
 
@@ -390,9 +392,9 @@ The prototype is located in the \texttt{app/} directory and is built with CMake.
 \textbf{\texttt{offline\_sync\_lib}} contains the core persistence abstractions:
 \begin{itemize}
   \item \texttt{IDatabaseInterface} — the abstract DBI used by game code, with virtual methods for all persistent game actions.
-  \item \texttt{Command} and \texttt{CommandLog} — the in-memory command queue described in Section~\ref{sec:architecture}.
+  \item \texttt{Command} and \texttt{CommandLog} — the in-memory command queue described in Section~\ref{sec:commandbased}.
   \item \texttt{Database} — a lightweight in-memory entity store used for testing, with version tracking and idempotency key recording.
-  \item \texttt{ReplayCommand} / \texttt{ReplayAll} — the conflict-resolution algorithm from Section~\ref{sec:architecture}, including the \texttt{RejectionManifest} type.
+  \item \texttt{ReplayCommand} / \texttt{ReplayAll} — the conflict-resolution algorithm from Section~\ref{sec:conflictresolution}, including the \texttt{RejectionManifest} type.
 \end{itemize}
 
 \textbf{\texttt{offline\_sync\_sqlite\_lib}} contains the SQLite-backed implementations:
