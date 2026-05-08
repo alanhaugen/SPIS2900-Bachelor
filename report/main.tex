@@ -6,6 +6,8 @@
 \usepackage{parskip}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
 \usepackage[
     backend=biber,
     style=apa
@@ -470,6 +472,36 @@ Commands & Time (ms) & Throughput (cmd/s) & Applied \\
 
 Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands. A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30\% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
 
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\linewidth, height=5.5cm,
+    xlabel={Commands},
+    ylabel={Throughput (M cmd/s)},
+    xmode=log,
+    xtick={100,500,1000,5000,10000,50000},
+    xticklabels={100,500,1K,5K,10K,50K},
+    ymin=0, ymax=9,
+    ymajorgrids=true,
+    grid style=dashed,
+    mark=*,
+    thick,
+    color=blue!70!black,
+]
+\addplot coordinates {
+    (100,   4.908)
+    (500,   5.780)
+    (1000,  6.448)
+    (5000,  6.197)
+    (10000, 6.958)
+    (50000, 5.341)
+};
+\end{axis}
+\end{tikzpicture}
+\caption{Replay throughput remains stable at 5–7 M cmd/s regardless of log size.}
+\end{figure}
+
 During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50,000 commands took 2,939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
 
 \subsection{Command Log Backend Comparison}
@@ -491,6 +523,41 @@ Commands & Mem. Append (ms) & SQL Append (ms) & Mem. Get (ms) & SQL Get (ms) \\
 
 SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms for 10,000 commands), which is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
 
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\linewidth, height=5.5cm,
+    xlabel={Commands},
+    ylabel={Append time (ms)},
+    xmode=log,
+    ymode=log,
+    xtick={100,1000,5000,10000},
+    xticklabels={100,1K,5K,10K},
+    ymajorgrids=true,
+    grid style=dashed,
+    legend pos=north west,
+    thick,
+]
+\addplot[color=blue!70!black, mark=*] coordinates {
+    (100,  0.005)
+    (1000, 0.01)
+    (5000, 0.06)
+    (10000,0.13)
+};
+\addlegendentry{Memory}
+\addplot[color=red!70!black, mark=square*] coordinates {
+    (100,  0.33)
+    (1000, 3.35)
+    (5000, 19.96)
+    (10000,33.57)
+};
+\addlegendentry{SQLite}
+\end{axis}
+\end{tikzpicture}
+\caption{SQLite append is $\sim$250$\times$ slower than in-memory due to ACID disk writes; both scale linearly.}
+\end{figure}
+
 \subsection{Conflict Detection Overhead}
 
 The third benchmark holds the command count fixed at 10,000 and varies the proportion of commands that are guaranteed to produce a version conflict, from 0\% to 100\%.
@@ -511,6 +578,33 @@ Conflict rate & Time (ms) & Throughput (cmd/s) & Applied \\
 
 Throughput varies by less than 20\% across the full range of conflict rates. Higher conflict rates are marginally faster because rejected commands skip the database write step. This confirms that the version check and classification logic add negligible overhead and that the system degrades gracefully under adversarial conflict conditions.
 
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\linewidth, height=5.5cm,
+    xlabel={Conflict rate (\%)},
+    ylabel={Throughput (M cmd/s)},
+    xtick={0,25,50,75,100},
+    ymin=0, ymax=14,
+    ymajorgrids=true,
+    grid style=dashed,
+    mark=*,
+    thick,
+    color=blue!70!black,
+]
+\addplot coordinates {
+    (0,   9.131)
+    (25,  10.898)
+    (50,  10.697)
+    (75,  10.163)
+    (100, 11.230)
+};
+\end{axis}
+\end{tikzpicture}
+\caption{Throughput remains within 20\% across all conflict rates, confirming conflict detection adds negligible overhead.}
+\end{figure}
+
 \subsection{Full Offline Session Round-Trip}
 
 The fourth benchmark measures the complete cost of an offline session using the SQLite command log: appending commands to the durable log, retrieving them, and replaying against the in-memory database.
@@ -529,6 +623,40 @@ Commands & Append (ms) & GetPending (ms) & ReplayAll (ms) & Total (ms) \\
 \end{center}
 
 A full session of 10,000 commands completes in approximately 38 ms end-to-end. SQLite append accounts for roughly 80\% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\linewidth, height=5.5cm,
+    xlabel={Commands},
+    ylabel={Time (ms)},
+    ybar stacked,
+    bar width=18pt,
+    xtick={1,2,3,4},
+    xticklabels={100, 1{,}000, 5{,}000, 10{,}000},
+    ymin=0,
+    ymajorgrids=true,
+    grid style=dashed,
+    legend style={at={(0.02,0.98)}, anchor=north west},
+    thick,
+]
+\addplot[fill=blue!60, draw=blue!80!black] coordinates {
+    (1, 0.30) (2, 2.86) (3, 15.26) (4, 30.42)
+};
+\addlegendentry{Append}
+\addplot[fill=green!55!black, draw=green!70!black] coordinates {
+    (1, 0.02) (2, 0.17) (3, 0.84) (4, 1.70)
+};
+\addlegendentry{GetPending}
+\addplot[fill=orange!70, draw=orange!90!black] coordinates {
+    (1, 0.15) (2, 0.81) (3, 3.09) (4, 6.29)
+};
+\addlegendentry{ReplayAll}
+\end{axis}
+\end{tikzpicture}
+\caption{Full offline session cost broken down by phase; SQLite append dominates at $\sim$80\% of total time.}
+\end{figure}
 
 \subsection{Command Log Disk Footprint}
 
@@ -553,6 +681,35 @@ The per-command cost stabilizes at approximately 128 bytes for logs of 1,000 com
 The high per-command cost at small log sizes (327 bytes at 100 commands) is a consequence of SQLite's fixed page size of 4 KB: even a single-row database occupies at least two pages — one for the data table and one for the unique index. Once the log grows large enough to fill pages efficiently the overhead drops to the steady-state figure.
 
 In practical terms, a 1,000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10,000 commands occupies approximately 1.2 MB. These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\linewidth, height=5.5cm,
+    xlabel={Commands},
+    ylabel={File size (KB)},
+    xmode=log,
+    xtick={100,500,1000,5000,10000},
+    xticklabels={100,500,1K,5K,10K},
+    ymin=0,
+    ymajorgrids=true,
+    grid style=dashed,
+    mark=*,
+    thick,
+    color=blue!70!black,
+]
+\addplot coordinates {
+    (100,   32)
+    (500,   80)
+    (1000,  140)
+    (5000,  628)
+    (10000, 1248)
+};
+\end{axis}
+\end{tikzpicture}
+\caption{Command log file size grows linearly with command count; 10{,}000 commands occupy $\sim$1.2 MB.}
+\end{figure}
 
 \newpage
 
