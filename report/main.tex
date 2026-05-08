@@ -131,9 +131,9 @@ World of Warcraft \autocite{wow} is one of the earliest and largest-scale exampl
 
 Blizzard Entertainment's Diablo III \autocite{diablo3} required a persistent connection to the Battle.net infrastructure even for solo gameplay, on the grounds that all character state was stored and validated server-side. At launch in 2012 this meant that server overload made the game completely unplayable despite no multiplayer interaction being involved — an incident widely referred to as "Error 37." This illustrates a concrete failure mode of the purely server-authoritative model: availability of the game depends entirely on availability of the developer's infrastructure, regardless of whether the player is interacting with others.
 
-Many large-scale survival multiplayer games — such as Rust and DayZ — take the same approach and make offline play impossible, requiring a persistent connection to a central server at all times. This sidesteps synchronization entirely but at the cost of accessibility.
+Many large-scale survival multiplayer games — such as Rust and DayZ — take the same approach and make offline play impossible, requiring a persistent connection to a central server at all times. This sidesteps offline to online persistence synchronization entirely, but at the cost of offline-mode.
 
-The academic distributed systems literature offers more principled solutions, though they come with trade-offs in implementation complexity.
+The academic distributed systems literature offers more principled solutions, though they come with trade-offs in implementation complexity:
 
 Conflict-free Replicated Data Types (CRDTs) \autocite{shapiro2011crdts} are mathematical data structures that guarantee eventual consistency without coordination. Any two replicas can be merged in any order and will converge to the same result. CRDTs would eliminate the need for conflict resolution policies entirely, but they require redesigning every game data type to conform to CRDT semantics — a significant architectural investment. They are also better suited to data types like counters and sets than to the complex relational structures (buildings with positions, quest state, faction graphs) that survival games require.
 
@@ -156,7 +156,9 @@ A common design pattern for this kind of system is to apply the Service Locator 
 
 A well-designed DBI supports atomicity, consistency, and \gls{idempotency}. If a network failure occurs, or if the client is uncertain whether a transaction completed, the DBI can safely retry without risking duplicate or inconsistent state changes. An important structural advantage of this abstraction is that the DBI can be swapped out via the Service Locator pattern: an online session routes calls to the remote SQL backend, while an offline session could route them to a local implementation — the implications of which are explored in Section~\ref{sec:architecture}.
 
-A SQL-based DBI architecture treats the cloud-hosted SQL database as the single authoritative source of truth for all persistent game state. This provides strong consistency guarantees in fully online environments, but it inherently depends on centralized authority and does not account for state divergence in disconnected scenarios.
+A SQL-based DBI architecture treats the cloud-hosted SQL database as the single authoritative source of truth for all persistent game state. This provides strong consistency guarantees in fully online environments, but it inherently depends on centralized authority and does not account for state divergence in disconnected scenarios. See the listing below:
+
+\newpage
 
 \begin{lstlisting}[language=C++, caption={DBI interface (abstract base class)}]
 class IDatabaseInterface
@@ -228,7 +230,9 @@ This approach introduces several advantages:
   \item Existing server-side transactional guarantees can remain unchanged.
 \end{enumerate}
 
-By storing intent rather than derived state, the system avoids directly merging divergent world snapshots and instead synchronizes through ordered execution of state-modifying operations.
+By storing intent rather than derived state, the system avoids directly merging divergent world snapshots and instead synchronizes through ordered execution of state-modifying operations. See the listing below:
+
+\newpage
 
 \begin{lstlisting}[language=C++, caption={Command structure and local command log}]
 struct Command
@@ -416,6 +420,10 @@ SQLite is an embedded, serverless, ACID-compliant relational database engine tha
 By preserving the DBI abstraction layer, the system can maintain a consistent programming interface for persistence operations regardless of connectivity state. When offline, DBI calls would be routed to the SQLite backend. When online, calls would be directed to the existing SQL infrastructure.
 
 This design minimizes disruption to the gameplay code, as the persistence boundary remains unchanged. However, it introduces challenges related to schema compatibility, transaction semantics, and synchronization between the local SQLite instance and the authoritative cloud database.
+
+A deeper limitation is that a SQLite-backed DBI alone is not sufficient for synchronization. The SQLite DBI is a \emph{readable state store} — it answers the question "what does the world look like right now?" and allows the game to display inventory, buildings, and quest progress during an offline session. What it does not provide is a record of what \emph{changed} during that session. On reconnection, the server has no way to know which operations the player performed; it can only observe that local and remote state have diverged. Merging two divergent snapshots requires structural diffing of every entity, which becomes increasingly error-prone as the world model grows more complex.
+
+This is why the command log is a necessary complement rather than an optional addition. The command log is a \emph{pending change queue} — it records each action as it is taken so that the exact sequence of player intent can be replayed on the server. After a successful replay the log is drained; the SQLite state store is not. The two components answer different questions and cannot substitute for each other: removing the command log leaves no replay record, while removing the SQLite DBI leaves the game unable to read any state while offline.
 
 \subsection{ORM (Object-Relational Mapping)}
 \label{sec:ormimp}
