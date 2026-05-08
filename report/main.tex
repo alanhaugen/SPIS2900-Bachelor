@@ -65,7 +65,7 @@ En prototype ble bygget i C++, inkludert en SQLite-basert frakoblet database og 
 
 I would like to thank my mentor, Tord Sindre Trøen, for helping me grow as a programmer and for giving me insight into the inner workings of professional game engine development and studio practices. His patience and guidance have strengthened my ability to think critically about code, particularly in the context of code reviews and the broader impact of technical changes. He also introduced me to effective ways of using AI to support code production, while maintaining a critical perspective on the generated results. In addition, he emphasized the importance of seeking help when needed and reaching out to others with prior experience in the systems I work with — advice that has reinforced similar guidance I have received from mentors in the past.
 
-I would also like to thank Maria Esperanza Johnson for her continued support throughout the course. I am grateful to Andreas Aasom Brandsnes, who has been an excellent collaborator and a kind friend on past projects. I would further like to thank Håvard Vibekko at the University of Inland Norway, Fredrik Martol at Funcom, and the Funcom Core Engine Team for giving me the opportunity to experience game development within a cutting-edge studio environment.
+I would also like to thank Maria Esperanza Johnson Ruiz for her continued support throughout the course. I am grateful to Andreas Aasom Brandsnes, who has been an excellent collaborator and a kind friend on past projects. I would further like to thank Håvard Vibeto at the University of Inland Norway, Fredrik Martol at Funcom, and the Funcom Core Engine Team for giving me the opportunity to experience game development within a cutting-edge studio environment.
 
 I would also like to thank my academic advisor at the University of Inland Norway, Ole Einar Flaten, who teaches 3D programming and game engine development—two of my primary areas of interest. His feedback and academic guidance have been invaluable throughout the thesis process, as well as during the internship period from 15 January to 13 May 2026.
 
@@ -173,15 +173,15 @@ public:
 
 A server-authoritative persistence architecture operates under the assumption of continuous connectivity to a centralized cloud infrastructure. While this model ensures strong consistency and transactional integrity in online multiplayer environments, it introduces several limitations when extended to offline or hybrid scenarios.
 
-\subsection{Dependence on Continuous Connectivity}
+\subsubsection{Dependence on Continuous Connectivity}
 
 Because all state-modifying actions are executed as remote transactions, gameplay cannot progress without server access. This dependency prevents offline play entirely and limits deployment flexibility on platforms where online access may be restricted or requires a paid subscription service.
 
-\subsection{Absence of Local Persistence Authority}
+\subsubsection{Absence of Local Persistence Authority}
 
 In a purely server-authoritative model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during a session, durable storage is exclusively managed by the remote infrastructure. This prevents local world progression in disconnected scenarios and complicates support for local cooperative play modes.
 
-\subsection{Lack of Divergence Handling Mechanisms}
+\subsubsection{Lack of Divergence Handling Mechanisms}
 
 A server-authoritative architecture assumes a single linear progression of state changes and does not account for concurrent or divergent modifications occurring in separate environments — for example, an offline client and the live server both modifying the same entity. Consequently, such architectures typically lack:
 
@@ -193,7 +193,7 @@ A server-authoritative architecture assumes a single linear progression of state
 
 Without these components, safely synchronizing locally modified state with cloud-based state is not possible.
 
-\subsection{Scalability vs.\ Flexibility Trade-off}
+\subsubsection{Scalability vs.\ Flexibility Trade-off}
 
 A centralized server-authoritative design scales well for persistent multiplayer environments but sacrifices flexibility. Extending it toward hybrid offline–online play requires introducing distributed state management — concerns that a purely server-authoritative architecture was not originally designed to address.
 
@@ -202,7 +202,7 @@ A centralized server-authoritative design scales well for persistent multiplayer
 \section{Proposed Hybrid Persistence Architecture}
 \label{sec:architecture}
 
-\subsection{Command-Based State Replication}
+%\subsection{Command-Based State Replication}
 
 To enable offline progression while preserving compatibility with a server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
 
@@ -364,26 +364,6 @@ Figure~\ref{fig:architecture} shows the overall data flow.
 \label{fig:architecture}
 \end{figure}
 
-\subsection{Local Persistence via SQLite}
-
-A direct approach to enabling offline functionality is to extend the Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote SQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
-
-SQLite is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike other SQL implementations, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
-
-By preserving the DBI abstraction layer, the system can maintain a consistent programming interface for persistence operations regardless of connectivity state. When offline, DBI calls would be routed to the SQLite backend. When online, calls would be directed to the existing SQL infrastructure.
-
-This design minimizes disruption to the gameplay code, as the persistence boundary remains unchanged. However, it introduces challenges related to schema compatibility, transaction semantics, and synchronization between the local SQLite instance and the authoritative cloud database.
-
-\subsection{ORM (Object-Relational Mapping)}
-
-An alternative architectural approach considered was the introduction of an Object–Relational Mapping (ORM) system. An ORM provides a layer that maps in-memory C++ objects directly to relational database structures, allowing persistent entities to be stored and retrieved without writing explicit SQL logic. In such a system, game objects (e.g., inventory items, buildings, or quests) would be automatically translated into database rows and reconstructed from relational data.
-
-ORM frameworks are common in higher-level languages such as Python and Java, where reflection and dynamic typing simplify runtime type inspection and schema generation. In contrast, implementing a fully featured ORM in C++ presents additional complexity due to the lack of built-in reflection and the need for explicit type registration and serialization logic.
-
-While an ORM could reduce manual database interaction and potentially simplify persistence logic, several factors limited its suitability for this project. First, the DBI abstraction connected to predefined SQL functions is already a stable persistence boundary. Introducing an ORM would require significant restructuring of that boundary. Second, the project required explicit support for SQLite in offline mode, meaning that any ORM solution would need to maintain compatibility across multiple database backends. Finally, time constraints and integration risks made a full ORM implementation impractical within the scope of this bachelor project.
-
-For these reasons, the project retained the existing DBI abstraction and instead focused on extending it to support hybrid online–offline persistence rather than replacing it with a generalized object–relational mapping layer.
-
 \subsection{Prototype Implementation}
 
 A self-contained C++ prototype of the proposed architecture was developed alongside this thesis and is available at:
@@ -409,6 +389,34 @@ The prototype is located in the \texttt{app/} directory and is built with CMake.
 \end{itemize}
 
 The prototype includes 31 Catch2 unit tests covering the command log, idempotency, commutative merging, non-commutative conflict detection, SQLite persistence, and a full offline-session integration scenario.
+
+\newpage
+
+\section{Alternative State Replication Persistence Architectures}
+
+Other simpler alternatives to the Command-Based State Replication have been considered and will be described and discussed below. Some of the problems with the alternative architectures revolve around a lack of functionality for solving divergent state (see section \ref{sec:sqliteimp}) and implementation complexity (see section \ref{sec:ormimp}).
+
+\subsection{Local Persistence via SQLite}
+\label{sec:sqliteimp}
+
+A direct approach to enabling offline functionality is to extend the Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote SQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
+
+SQLite is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike other SQL implementations, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
+
+By preserving the DBI abstraction layer, the system can maintain a consistent programming interface for persistence operations regardless of connectivity state. When offline, DBI calls would be routed to the SQLite backend. When online, calls would be directed to the existing SQL infrastructure.
+
+This design minimizes disruption to the gameplay code, as the persistence boundary remains unchanged. However, it introduces challenges related to schema compatibility, transaction semantics, and synchronization between the local SQLite instance and the authoritative cloud database.
+
+\subsection{ORM (Object-Relational Mapping)}
+\label{sec:ormimp}
+
+An alternative architectural approach considered was the introduction of an Object–Relational Mapping (ORM) system. An ORM provides a layer that maps in-memory C++ objects directly to relational database structures, allowing persistent entities to be stored and retrieved without writing explicit SQL logic. In such a system, game objects (e.g., inventory items, buildings, or quests) would be automatically translated into database rows and reconstructed from relational data.
+
+ORM frameworks are common in higher-level languages such as Python and Java, where reflection and dynamic typing simplify runtime type inspection and schema generation. In contrast, implementing a fully featured ORM in C++ presents additional complexity due to the lack of built-in reflection and the need for explicit type registration and serialization logic.
+
+While an ORM could reduce manual database interaction and potentially simplify persistence logic, several factors limited its suitability for this project. First, the DBI abstraction connected to predefined SQL functions is already a stable persistence boundary. Introducing an ORM would require significant restructuring of that boundary. Second, the project required explicit support for SQLite in offline mode, meaning that any ORM solution would need to maintain compatibility across multiple database backends. Finally, time constraints and integration risks made a full ORM implementation impractical within the scope of this bachelor project.
+
+For these reasons, the project retained the existing DBI abstraction and instead focused on extending it to support hybrid online–offline persistence rather than replacing it with a generalized object–relational mapping layer.
 
 \newpage
 
