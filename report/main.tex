@@ -331,6 +331,51 @@ ReplayResult ReplayCommand(const Command& cmd, Database& db,
 
 Commands that fail validation are not silently discarded. Instead, they are collected into a rejection manifest that is returned to the client after the replay pass completes. The manifest records the command type, the reason for rejection, and the current server-side state of the affected entity. This allows the game to inform the player of which offline actions could not be applied and why, enabling the client to present meaningful feedback rather than silently losing progress.
 
+\subsection{Command Dispatch and SQL Execution}
+\label{sec:dispatch}
+
+Once \texttt{ReplayCommand} determines that a command passes validation, it calls \texttt{db.Commit(cmd)}. The commit step dispatches on the command's \texttt{type} field and invokes the corresponding method on the DBI, which translates the operation into one or more SQL statements. The mapping is straightforward: each command type corresponds directly to a single DBI method, and each DBI method is responsible for the SQL that implements the game-domain operation it represents.
+
+\begin{lstlisting}[language=C++, caption={Server-side command dispatch to DBI methods}]
+ReplayResult Database::Commit(const Command& cmd)
+{
+    if (cmd.type == "CreateBuilding")
+        dbi.CreateBuilding(cmd.entityId, cmd.delta, 0, 0, 0);
+    else if (cmd.type == "DestroyBuilding")
+        dbi.DestroyBuilding(cmd.entityId);
+    else if (cmd.type == "TransferItem")
+        dbi.TransferItem(cmd.entityId, cmd.delta);
+    else if (cmd.type == "CompleteQuest")
+        dbi.CompleteQuest(cmd.entityId, cmd.delta);
+    else if (cmd.type == "ResourceDelta" ||
+             cmd.type == "ReputationDelta")
+        dbi.UpdateFactionRelation(cmd.entityId, cmd.delta);
+
+    RecordApplied(cmd.idempotencyKey);
+    IncrementVersion(cmd.entityId);
+    return ReplayResult::Committed;
+}
+\end{lstlisting}
+
+Each DBI method executes a specific SQL pattern chosen to preserve the correctness properties of that command class:
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+Command type & DBI method & SQL pattern \\
+\hline
+\texttt{CreateBuilding}  & \texttt{CreateBuilding}        & \texttt{INSERT INTO buildings} \\
+\texttt{DestroyBuilding} & \texttt{DestroyBuilding}       & \texttt{DELETE FROM buildings WHERE id = ?} \\
+\texttt{TransferItem}    & \texttt{TransferItem}          & \texttt{BEGIN; SELECT / UPDATE / UPSERT; COMMIT} \\
+\texttt{CompleteQuest}   & \texttt{CompleteQuest}         & \texttt{INSERT OR IGNORE INTO completed\_quests} \\
+\texttt{ResourceDelta}   & \texttt{UpdateFactionRelation} & \texttt{INSERT … ON CONFLICT DO UPDATE SET} \\
+\texttt{ReputationDelta} & \texttt{UpdateFactionRelation} & \texttt{relation = relation + excluded.relation} \\
+\hline
+\end{tabular}
+\end{center}
+
+The SQL patterns are not arbitrary. \texttt{INSERT OR IGNORE} for quest completion makes the operation inherently idempotent at the database level — a duplicate replay of the same quest completion is silently discarded even if the idempotency check at the application level somehow fails. The UPSERT pattern for resource and reputation deltas (\texttt{ON CONFLICT DO UPDATE SET value = value + excluded.value}) accumulates the delta additively, which is the correct merge behaviour for commutative operations regardless of how many times the command is replayed. The explicit \texttt{BEGIN}/\texttt{COMMIT} transaction wrapping \texttt{TransferItem} ensures that the debit from the sender and the credit to the recipient are atomic — either both succeed or neither does, preventing inventory from being created or destroyed by a partial failure.
+
 \subsection{Integration Possibilities}
 
 In a server-authoritative game, every action that should persist goes through the DBI. By extending the DBI into a factory that produces command objects, the system can route actions in two ways depending on connectivity state: online commands are transmitted to the server immediately, while offline commands are serialized and stored on disk, deferred until the player reconnects.
