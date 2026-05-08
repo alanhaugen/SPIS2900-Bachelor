@@ -141,7 +141,7 @@ Operational Transformation (OT) \autocite{ellis1989ot}, the technique underlying
 
 Event sourcing \autocite{fowler2005eventsourcing} is a software architecture pattern in which state is derived entirely from an append-only log of events. The command log proposed in this thesis is closely related: both record intent rather than state, and both allow the current state to be reconstructed by replaying the log. The key difference is that event sourcing typically assumes a single authoritative log, whereas this thesis addresses what happens when two divergent logs (client offline, server online) must be merged.
 
-The conflict resolution strategy — particularly entity versioning and optimistic concurrency control — follows the approach described by Bernstein and Goodman \autocite{bernstein1981concurrency}, where transactions validate preconditions at commit time rather than acquiring locks upfront. In computer science, locks known as mutexes are used to ensure that two threads or computers do not change the same data at the same time. By not using locks, or mutexes, the system will work even when offline.
+The conflict resolution strategy — particularly entity versioning and optimistic concurrency control — follows the approach described by Bernstein and Goodman \autocite{bernstein1981concurrency}, where transactions validate preconditions at commit time rather than acquiring locks upfront. Traditional concurrency control relies on mutexes: a thread or process acquires an exclusive lock before modifying shared state, blocking all other writers until the lock is released. This works well in environments where all participants are continuously connected, but is impractical when a client may be offline for an extended period — holding a lock across a disconnection would stall the entire system. Optimistic concurrency control avoids this by allowing offline progress to proceed freely and deferring conflict detection to the moment of reconnection, making it a natural fit for the hybrid offline–online scenario addressed in this thesis.
 
 \newpage
 
@@ -215,7 +215,7 @@ A centralized server-authoritative design scales well for persistent multiplayer
 
 %\subsection{Command-Based State Replication}
 
-To enable offline progression while preserving compatibility with a server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
+To enable offline progression while preserving compatibility with a server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software \autocite{gamma1994design} and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
 
 Rather than directly modifying persistent state in the cloud, player actions are encapsulated as serializable command objects. Each command represents an intention to modify game state (e.g., create building, transfer item, complete quest) along with the necessary parameters to execute the modification.
 
@@ -415,7 +415,7 @@ Other simpler alternatives to the Command-Based State Replication have been cons
 
 A direct approach to enabling offline functionality is to extend the Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote SQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
 
-SQLite is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike other SQL implementations, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
+SQLite \autocite{sqliteorg} is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike other SQL implementations, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
 
 By preserving the DBI abstraction layer, the system can maintain a consistent programming interface for persistence operations regardless of connectivity state. When offline, DBI calls would be routed to the SQLite backend. When online, calls would be directed to the existing SQL infrastructure.
 
