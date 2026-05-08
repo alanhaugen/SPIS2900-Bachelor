@@ -93,7 +93,7 @@ Many gamers prefer to play offline, but might want to connect online as they adv
 
 The following research statement is investigated:
 
-\subsection{How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?}
+\subsection*{How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?}
 
 \newpage
 
@@ -292,7 +292,7 @@ Not all version mismatches require rejection. Commands can be classified by thei
 
 \subsubsection{Resolution Policies}
 
-For each conflict class, a deterministic resolution policy is applied server-side before any command is committed.
+For each conflict class, a deterministic resolution policy is applied server-side before any command is committed. See listing below:
 
 \begin{lstlisting}[language=C++, caption={Server-side command validation and conflict resolution}]
 ReplayResult ReplayCommand(const Command& cmd, Database& db,
