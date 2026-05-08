@@ -1,4 +1,5 @@
 *.log
+*.glg
 *.toc
 *.aux
 *.swp

@@ -91,7 +91,9 @@ This requirement introduces architectural challenges which need to be addressed 
 
 Many gamers prefer to play offline, but might want to connect online as they advance in the persistent world. Collaboration with other players is often necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world \autocite{CERE2021105}. Designs that allow users to transition online after initial offline sessions are explored.
 
-The following research statement is investigated: How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?
+The following research statement is investigated:
+
+\emph{How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?}
 
 \newpage
 
@@ -101,9 +103,16 @@ A design science research approach \autocite{hevner2004design} has been adopted.
 
 The research is conducted in three phases. The first stage is analysis: it involves analyzing existing, server authoritative persistence systems and identifying the problems associated with playing offline. This analysis is performed in Section~\ref{sec:challenges}.
 
-Proposal for second stage design: a hybrid architecture derived from the Command Pattern, with conflict resolution, and showing how the design fits together with online SQL backends and a local SQLite store, is proposed. Design decisions are recorded in Section~\ref{sec:architecture}. The third stage is evaluation, implemented in C++, against two requirements.
+Proposal for second stage design: a hybrid architecture derived from the Command Pattern, with conflict resolution, and showing how the design fits together with online SQL backends and a local SQLite store, is proposed. Design decisions are recorded in Section~\ref{sec:architecture}.
 
-Correctness, where all parts of the design are covered by automated unit and integration tests, written using the Catch2 framework. Performance, where the replay throughput, command log size limits, conflict detection overhead, and the end-to-end cost of a full offline session are measured using a suite of benchmark programs.
+The third stage is evaluation, implemented in C++, against two requirements:
+
+\begin{enumerate}
+\item Correctness, where all parts of the design are covered by automated unit and integration tests, written using the Catch2 framework. 
+\item Performance, where the replay throughput, command log size limits, conflict detection overhead, and the end-to-end cost of a full offline session are measured using a suite of benchmark programs.
+\end{enumerate}
+
+Alternative solutions to the research question are briefly discussed in Section~\ref{sec:alt}. The evaluation is described further in Section~\ref{sec:evaluation}.
 
 \newpage
 
@@ -393,6 +402,7 @@ The prototype includes 31 Catch2 unit tests covering the command log, idempotenc
 \newpage
 
 \section{Alternative State Replication Persistence Architectures}
+\label{sec:alt}
 
 Other simpler alternatives to the Command-Based State Replication have been considered and will be described and discussed below. Some of the problems with the alternative architectures revolve around a lack of functionality for solving divergent state (see section \ref{sec:sqliteimp}) and implementation complexity (see section \ref{sec:ormimp}).
 
