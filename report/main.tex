@@ -95,7 +95,7 @@ Many gamers prefer to play offline, but might want to connect online as they adv
 
 The following research statement is investigated:
 
-\subsection*{How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?}
+\subsection*{How can a hybrid offline–online persistence system for survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?}
 
 \newpage
 
@@ -188,27 +188,27 @@ A server-authoritative persistence architecture operates under the assumption of
 
 \subsubsection{Dependence on Continuous Connectivity}
 
-Because all state-modifying actions are executed as remote transactions, gameplay cannot progress without server access. This dependency prevents offline play entirely and limits deployment flexibility on platforms where online access may be restricted or requires a paid subscription service.
+Because all state-modifying actions are executed as remote transactions, gameplay cannot progress without server access. This dependency prevents offline play entirely and limits deployment flexibility on platforms where online access may be restricted or requires a paid subscription service. In practice, this means that a player who loses their internet connection mid-session — whether due to a router failure, a mobile network dropout, or a server maintenance window — cannot continue playing at all. Any progress made since the last successfully committed transaction is lost, and the client has no mechanism to queue or defer actions for later submission. For players in regions with unreliable infrastructure, or on console platforms where online access requires a paid subscription, the game is effectively inaccessible for extended periods. The hybrid architecture proposed in Section~\ref{sec:architecture} addresses this by decoupling action generation from action transmission.
 
 \subsubsection{Absence of Local Persistence Authority}
 
-In a purely server-authoritative model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during a session, durable storage is exclusively managed by the remote infrastructure. This prevents local world progression in disconnected scenarios and complicates support for local cooperative play modes.
+In a purely server-authoritative model, the client does not maintain an authoritative local representation of persistent world state. Although temporary state may exist in memory during a session, durable storage is exclusively managed by the remote infrastructure. This prevents local world progression in disconnected scenarios and complicates support for local cooperative play modes. A concrete consequence is crash sensitivity: if the game process terminates unexpectedly — due to a power failure, an operating system crash, or a forced application quit — any in-memory state accumulated since the last server round-trip is silently lost. The player reconnects to find their progress rolled back, with no indication of how much was undone. A local persistence layer, such as the SQLite-backed DBI described in Section~\ref{sec:sqliteimp}, would allow progress to survive process termination by writing state to disk before it is confirmed by the server.
 
 \subsubsection{Lack of Divergence Handling Mechanisms}
 
 A server-authoritative architecture assumes a single linear progression of state changes and does not account for concurrent or divergent modifications occurring in separate environments — for example, an offline client and the live server both modifying the same entity. Consequently, such architectures typically lack:
 
 \begin{enumerate}
-  \item Version tracking mechanisms
-  \item Conflict detection strategies
-  \item Deterministic merge policies
+  \item \textbf{Version tracking mechanisms} — without a record of which version of an entity a player acted on, it is impossible to determine whether a subsequent action was based on stale information.
+  \item \textbf{Conflict detection strategies} — without version tracking, there is no reliable way to identify when two independent modifications targeted the same entity in incompatible ways.
+  \item \textbf{Deterministic merge policies} — even when a conflict is detected, there must be a defined rule for resolving it; last-write-wins, rejection, or type-specific merging each produce different outcomes for the player.
 \end{enumerate}
 
-Without these components, safely synchronizing locally modified state with cloud-based state is not possible.
+Without these components, safely synchronizing locally modified state with cloud-based state is not possible. The version-based conflict detection and command classification strategy developed in Section~\ref{sec:conflictresolution} directly addresses each of these three gaps.
 
 \subsubsection{Scalability vs.\ Flexibility Trade-off}
 
-A centralized server-authoritative design scales well for persistent multiplayer environments but sacrifices flexibility. Extending it toward hybrid offline–online play requires introducing distributed state management — concerns that a purely server-authoritative architecture was not originally designed to address.
+A centralized server-authoritative design scales well for persistent multiplayer environments but sacrifices flexibility. Extending it toward hybrid offline–online play requires introducing distributed state management — concerns that a purely server-authoritative architecture was not originally designed to address. The tension is not simply technical: each step toward offline support requires loosening assumptions that the rest of the system depends on. Allowing local writes means accepting that two versions of the same entity can exist simultaneously. Accepting divergent state means requiring conflict resolution. Requiring conflict resolution means classifying every operation by its merge semantics. These are compounding concerns, and retrofitting them onto an architecture built around a single authoritative source of truth is substantially more difficult than designing for them from the outset.
 
 \newpage
 
@@ -830,7 +830,7 @@ Several directions for future investigation emerge from the limitations identifi
 \section{Conclusion}
 \label{sec:conclusion}
 
-This thesis investigated the following research question: How can synchronization algorithms for persistent game state be designed and evaluated with respect to consistency, conflict resolution, and scalability in large-scale survival multiplayer games?
+This thesis investigated the following research question: How can a hybrid offline–online persistence system for survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?
 
 The starting point was a server-authoritative persistence architecture in which all state changes are executed as transactional SQL operations against a centralized cloud backend. While robust in fully online environments, this model assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
 
@@ -842,7 +842,7 @@ The proposed solution is a command-based replication model. Rather than synchron
 
 \textbf{Conflict resolution} is handled through a combination of entity versioning, command classification, and per-type resolution policies. Idempotent commands are replayed unconditionally; commutative operations such as resource deltas are merged by summation; and non-commutative operations are validated against current server state before being accepted or rejected. Commands that cannot be applied are returned to the client in a rejection manifest rather than being silently discarded.
 
-\textbf{Scalability} is supported by the architecture's compatibility with a server-authoritative backend. Because synchronization occurs through ordered command replay rather than full state diffing, the volume of data transmitted on reconnection is proportional to the number of offline actions rather than the total world size.
+\textbf{Reconnection performance} was evaluated through a suite of benchmarks on a single development machine. A log of 10,000 commands replays in under 2 ms in memory and under 40 ms end-to-end including SQLite persistence. Conflict detection adds less than 20\% overhead regardless of conflict rate, and the command log file remains under 1.2 MB at 10,000 commands. These results indicate that the synchronization mechanism itself is unlikely to be a perceptible bottleneck during reconnection for sessions of realistic size.
 
 The approach introduces its own requirements: commands must be deterministic and replay-safe, ordering must be preserved across the command log, and server-side validation logic must cover all command types to prevent exploitation. These constraints are manageable within a server-authoritative architecture but would require careful engineering in a production system.
 
