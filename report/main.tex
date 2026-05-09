@@ -388,7 +388,7 @@ std::unique_ptr<IDatabaseInterface> CreateDBI(bool isOnline)
     if (isOnline)
         return std::make_unique<RemoteSQLDBI>(serverConfig);
     else
-        return std::make_unique<SQLiteDBI>("offline_state.db");
+        return std::make_unique<SQLiteDBI>("offline.db");
 }
 \end{lstlisting}
 
