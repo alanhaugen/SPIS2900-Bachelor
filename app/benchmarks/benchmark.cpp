@@ -275,6 +275,80 @@ static void BenchSQLiteFullReplay()
     }
 }
 
+// ── Experiment 6: Network-aware reconnection latency ─────────────────────────
+//
+// Models the command log as a single batch request/response cycle.
+// Network overhead = RTT / (1 - lossRate)  [geometric retransmission model].
+// Local overhead is measured directly; the two are summed for total latency.
+static void BenchNetworkModel()
+{
+    struct NetPreset { const char* name; double rttMs; double lossRate; };
+    static const NetPreset presets[] = {
+        {"No network",    0.0,   0.000},
+        {"LAN",           2.0,   0.000},
+        {"Broadband",    40.0,   0.005},
+        {"Mobile",      120.0,   0.020},
+        {"Poor mobile", 300.0,   0.050},
+    };
+
+    std::cout << "\n=== Experiment 6: Network-aware reconnection latency ===\n";
+    std::cout << std::left
+              << std::setw(16) << "Network"
+              << std::setw(12) << "Commands"
+              << std::setw(16) << "Local (ms)"
+              << std::setw(16) << "Network (ms)"
+              << "Total (ms)\n";
+    std::cout << std::string(72, '-') << "\n";
+
+    const int entityCount = 200;
+
+    for (int count : {100, 1000, 10000})
+    {
+        std::mt19937 rng(42);
+        auto cmds = GenerateCommands(count, entityCount, 0.1, rng);
+
+        // Measure local cost
+        Database db;
+        SeedDatabase(db, entityCount);
+        SQLiteCommandLog sqlLog(":memory:");
+
+        auto t0 = Clock::now();
+        for (const auto& c : cmds) sqlLog.Append(c);
+        double appendMs = elapsed_ms(t0);
+
+        t0 = Clock::now();
+        auto pending = sqlLog.GetPending();
+        double getMs = elapsed_ms(t0);
+
+        t0 = Clock::now();
+        RejectionManifest manifest;
+        for (const auto& c : pending)
+        {
+            ReplayResult r = ReplayCommand(c, db, manifest);
+            if (r == ReplayResult::Committed || r == ReplayResult::Duplicate)
+                sqlLog.MarkFlushed(c.idempotencyKey);
+        }
+        double replayMs = elapsed_ms(t0);
+
+        double localMs = appendMs + getMs + replayMs;
+
+        for (const auto& p : presets)
+        {
+            double attempts  = (p.lossRate > 0.0) ? 1.0 / (1.0 - p.lossRate) : 1.0;
+            double networkMs = p.rttMs * attempts;
+            double totalMs   = localMs + networkMs;
+
+            std::cout << std::left
+                      << std::setw(16) << p.name
+                      << std::setw(12) << count
+                      << std::setw(16) << std::fixed << std::setprecision(2) << localMs
+                      << std::setw(16) << std::fixed << std::setprecision(2) << networkMs
+                      << std::fixed << std::setprecision(2) << totalMs << "\n";
+        }
+        std::cout << "\n";
+    }
+}
+
 // ── Experiment 5: SQLite command log disk footprint ───────────────────────────
 static void BenchDiskFootprint()
 {
@@ -345,6 +419,7 @@ int main()
     BenchConflictRate();
     BenchSQLiteFullReplay();
     BenchDiskFootprint();
+    BenchNetworkModel();
 
     std::cout << "\nDone.\n";
     return 0;

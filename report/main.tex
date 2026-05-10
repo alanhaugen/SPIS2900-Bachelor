@@ -95,7 +95,7 @@ Many gamers prefer to play offline, but might want to connect online as they adv
 
 The following research statement is investigated:
 
-\subsection*{How can a hybrid offline–online persistence system for survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?}
+\subsection*{How can a offline-online synchronization system for game persistence targeting survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?}
 
 \newpage
 
@@ -123,11 +123,11 @@ Alternative solutions to the research question are briefly discussed in Section~
 
 \subsection{Game Industry Approaches}
 
-Several commercially released games have addressed aspects of offline-online synchronization, though typically without revealing the underlying mechanisms.
+Several games available on the market have tried to solve the problem of syncing game data between playing offline and online. The game's developers do not typically disclose how they do it.
 
-Valheim \autocite{valheim} uses SQLite to store its world state locally on the hosting player's machine. The entire saved game is found in \texttt{world.db}. This makes the game fully playable offline and without any cloud dependency, but it provides no mechanism for merging divergent state: if two players host separate copies of the same world while disconnected, there is no supported way to reconcile the differences. This is effectively the snapshot problem described in Section~\ref{sec:challenges} — straightforward for single-player scenarios but unworkable for shared persistent worlds.
+Valheim \autocite{valheim} uses SQLite to store its world state locally on player's machines for offline sessions. The entire saved game is found in \texttt{world.db}. SQLite makes the game fully playable offline, but there is no functionality to merge databases. If two players host separate copies of the same world while disconnected, there is no supported way to rejoin and merge the session differences. This is the snapshot problem described in Section~\ref{sec:challenges}. SQLite makes it straightforward to implement single-player sessions but rejoining an online session with SQLite only introduces challenges regarding cheating and consistency.
 
-Steam Cloud Save \autocite{steamcloud} offers file-level synchronization across devices, uploading and downloading save files when a player connects. Conflicts are resolved by taking the most recently modified file, which is a form of last-write-wins and loses any changes made on the other device. This approach is simple and adequate for single-player games, but cannot handle concurrent modifications from multiple players.
+Steam Cloud Save \autocite{steamcloud} enables folders and files to be synchronized between computers. The save data is uploaded and downloaded when players connect to Steam. Conflicts are resolved by making the most recently modified file the one which is stored on the server, a last-write-wins system. This approach is simple and adequate for single-player games, but cannot handle merging modifications from multiple players.
 
 World of Warcraft \autocite{wow} is one of the earliest and largest-scale examples of a persistent multiplayer world built on a purely server-authoritative model. All world state — character progression, item ownership, guild dynamics — lives exclusively on Blizzard's servers, making offline play neither supported nor meaningful. When Blizzard shut down legacy vanilla servers in 2016, the entire game history of those worlds was lost to players, illustrating the preservation problem discussed in Section~\ref{sec:discussion} with particular clarity.
 
@@ -476,6 +476,8 @@ This design minimizes disruption to the gameplay code, as the persistence bounda
 
 A deeper limitation is that a SQLite-backed DBI alone is not sufficient for synchronization. The SQLite DBI is a \emph{readable state store} — it answers the question "what does the world look like right now?" and allows the game to display inventory, buildings, and quest progress during an offline session. What it does not provide is a record of what \emph{changed} during that session. On reconnection, the server has no way to know which operations the player performed; it can only observe that local and remote state have diverged. Merging two divergent snapshots requires structural diffing of every entity, which becomes increasingly error-prone as the world model grows more complex.
 
+A structural diff is insufficient for two deeper reasons. First, a diff records \emph{what changed}, not \emph{what the player did}: if a player's gold balance fell by 20, the diff sees $-20$, but whether that was a purchase, a trade, or a quest cost determines which server-side validation rules apply and what happens if the change is rejected. Without the originating operation, the server cannot classify the change or apply a meaningful resolution policy. Second, operations that cancel within a session leave no trace: if a player builds a structure and then demolishes it while offline, the net diff is empty — yet both actions consumed resources and triggered side-effects that the server must account for. A command log captures every step; a diff only captures the outcome.
+
 This is why the command log is a necessary complement rather than an optional addition. The command log is a \emph{pending change queue} — it records each action as it is taken so that the exact sequence of player intent can be replayed on the server. After a successful replay the log is drained; the SQLite state store is not. The two components answer different questions and cannot substitute for each other: removing the command log leaves no replay record, while removing the SQLite DBI leaves the game unable to read any state while offline.
 
 \subsection{ORM (Object-Relational Mapping)}
@@ -765,6 +767,79 @@ In practical terms, a 1,000-command offline session — already a large session 
 \label{fig:diskfootprint}
 \end{figure}
 
+\subsection{Network Latency Model}
+
+All previous benchmarks measure local processing cost in isolation. To place those figures in context, the sixth experiment models the full reconnection time by combining the measured local cost with a simple analytical network overhead. The command log is treated as a single batch request: the client serializes all pending commands, transmits them to the server, and waits for the rejection manifest. Under this model the network contribution to reconnection time is:
+
+\[
+t_{\text{network}} = \frac{\text{RTT}}{1 - p_{\text{loss}}}
+\]
+
+where RTT is the round-trip time and $p_{\text{loss}}$ is the packet loss rate. The denominator accounts for geometric retransmission: on a lossy link each attempt succeeds with probability $1 - p_{\text{loss}}$, so the expected number of attempts is $1/(1-p_{\text{loss}})$.
+
+Five representative network conditions are tested against three command log sizes.
+
+\begin{center}
+\begin{tabular}{lrrrr}
+\hline
+Network & Commands & Local (ms) & Network (ms) & Total (ms) \\
+\hline
+No network   & 100   & 0.52  & 0.00   & 0.52   \\
+LAN          & 100   & 0.52  & 2.00   & 2.52   \\
+Broadband    & 100   & 0.52  & 40.20  & 40.73  \\
+Mobile       & 100   & 0.52  & 122.45 & 122.97 \\
+Poor mobile  & 100   & 0.52  & 315.79 & 316.31 \\
+\hline
+No network   & 1,000 & 4.12  & 0.00   & 4.12   \\
+LAN          & 1,000 & 4.12  & 2.00   & 6.12   \\
+Broadband    & 1,000 & 4.12  & 40.20  & 44.32  \\
+Mobile       & 1,000 & 4.12  & 122.45 & 126.57 \\
+Poor mobile  & 1,000 & 4.12  & 315.79 & 319.91 \\
+\hline
+No network   & 10,000 & 40.22 & 0.00   & 40.22  \\
+LAN          & 10,000 & 40.22 & 2.00   & 42.22  \\
+Broadband    & 10,000 & 40.22 & 40.20  & 80.43  \\
+Mobile       & 10,000 & 40.22 & 122.45 & 162.67 \\
+Poor mobile  & 10,000 & 40.22 & 315.79 & 356.01 \\
+\hline
+\end{tabular}
+\end{center}
+
+For small logs (100 commands), the local cost is negligible at 0.5 ms; reconnection time is dominated almost entirely by network latency regardless of log size. Even on a poor mobile connection (300 ms RTT, 5\% loss), a 10,000-command log synchronizes in approximately 356 ms — well under half a second for what is already an unrealistically large offline session. Figure~\ref{fig:network} visualises the local–network breakdown for the 10,000-command case.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\linewidth, height=5.5cm,
+    xlabel={Network condition},
+    ylabel={Time (ms)},
+    ybar stacked,
+    bar width=22pt,
+    xtick={1,2,3,4,5},
+    xticklabels={No net, LAN, Broadband, Mobile, Poor mob.},
+    ymin=0,
+    ymajorgrids=true,
+    grid style=dashed,
+    legend style={at={(0.98,0.98)}, anchor=north east},
+    thick,
+]
+\addplot[fill=blue!60, draw=blue!80!black] coordinates {
+    (1,40.22)(2,40.22)(3,40.22)(4,40.22)(5,40.22)
+};
+\addlegendentry{Local}
+\addplot[fill=orange!70, draw=orange!90!black] coordinates {
+    (1,0)(2,2.00)(3,40.20)(4,122.45)(5,315.79)
+};
+\addlegendentry{Network}
+\end{axis}
+\end{tikzpicture}
+\caption{Reconnection time breakdown for 10{,}000 commands: local processing is constant at $\sim$40 ms; network RTT dominates under high-latency conditions.}
+\label{fig:network}
+\end{figure}
+
+The crossover point — where network overhead equals local processing cost — occurs at approximately 40 ms RTT, which corresponds to a mid-range broadband connection. Below that threshold (LAN), the synchronization mechanism itself is the bottleneck; above it, the network is. This suggests that for real-world deployments the primary lever for reducing reconnection time is reducing the size of the command log (for example, by coalescing commutative deltas) rather than optimising the local replay engine further.
+
 \newpage
 
 \section{Discussion}
@@ -785,6 +860,8 @@ The benchmark results support the architectural claims in several concrete ways.
 The replay throughput experiments show that processing a command log of 10,000 entries takes under 2 ms in the in-memory case and under 7 ms including SQLite retrieval. These figures suggest that reconnection latency attributable to the synchronization mechanism itself is unlikely to be perceptible in practice. The data transmitted on reconnection scales with the number of actions taken offline rather than with the size of the world, which is a meaningful advantage over snapshot-based approaches in large persistent worlds.
 
 The conflict rate experiment provides a particularly useful result: throughput varies by less than 20\% across the full range of conflict rates, from 0\% to 100\%. This means the system does not degrade meaningfully under adversarial conditions, and conflict detection can be considered a negligible overhead rather than a potential bottleneck.
+
+The network latency model shows that even on a poor mobile connection (300 ms RTT, 5\% packet loss), a 10,000-command log reconnects in approximately 356 ms end-to-end. For connections below roughly 40 ms RTT, local processing cost dominates; above that threshold network latency takes over. The practical implication is that coalescing commutative deltas to reduce log size is a more effective optimisation than improving replay speed for players on high-latency connections.
 
 The benchmarking process also revealed a design flaw in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} individually for each resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour that was not apparent from code review alone: 50,000 commands took nearly 3 seconds before the fix and 9 ms after. This illustrates the value of performance testing as part of the design process, not just as a post-hoc validation step.
 
@@ -839,7 +916,7 @@ Several directions for future investigation emerge from the limitations identifi
 \section{Conclusion}
 \label{sec:conclusion}
 
-This thesis investigated the following research question: How can a hybrid offline–online persistence system for survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?
+This thesis investigated the following research question: How can a offline-online synchronization system for game persistence targeting survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?
 
 The starting point was a server-authoritative persistence architecture in which all state changes are executed as transactional SQL operations against a centralized cloud backend. While robust in fully online environments, this model assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
 
@@ -851,7 +928,7 @@ The proposed solution is a command-based replication model. Rather than synchron
 
 \textbf{Conflict resolution} is handled through a combination of entity versioning, command classification, and per-type resolution policies. Idempotent commands are replayed unconditionally; commutative operations such as resource deltas are merged by summation; and non-commutative operations are validated against current server state before being accepted or rejected. Commands that cannot be applied are returned to the client in a rejection manifest rather than being silently discarded.
 
-\textbf{Reconnection performance} was evaluated through a suite of benchmarks on a single development machine. A log of 10,000 commands replays in under 2 ms in memory and under 40 ms end-to-end including SQLite persistence. Conflict detection adds less than 20\% overhead regardless of conflict rate, and the command log file remains under 1.2 MB at 10,000 commands. These results indicate that the synchronization mechanism itself is unlikely to be a perceptible bottleneck during reconnection for sessions of realistic size.
+\textbf{Reconnection performance} was evaluated through a suite of benchmarks on a single development machine, including a network latency model. A log of 10,000 commands replays in under 2 ms in memory and under 40 ms end-to-end including SQLite persistence. When network overhead is added, even a poor mobile connection (300 ms RTT, 5\% packet loss) produces a total reconnection time of approximately 356 ms. Conflict detection adds less than 20\% overhead regardless of conflict rate, and the command log file remains under 1.2 MB at 10,000 commands. These results indicate that the synchronization mechanism itself is unlikely to be a perceptible bottleneck during reconnection for sessions of realistic size.
 
 The approach introduces its own requirements: commands must be deterministic and replay-safe, ordering must be preserved across the command log, and server-side validation logic must cover all command types to prevent exploitation. These constraints are manageable within a server-authoritative architecture but would require careful engineering in a production system.
 
