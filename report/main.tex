@@ -519,7 +519,7 @@ Commands & Time (ms) & Throughput (cmd/s) & Applied \\
 \end{tabular}
 \end{center}
 
-Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands. A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30\% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
+Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands (Figure~\ref{fig:throughput}). A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30\% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
 
 \begin{figure}[h]
 \centering
@@ -549,6 +549,7 @@ Throughput is consistent at approximately 5–7 million commands per second acro
 \end{axis}
 \end{tikzpicture}
 \caption{Replay throughput remains stable at 5–7 M cmd/s regardless of log size.}
+\label{fig:throughput}
 \end{figure}
 
 During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50,000 commands took 2,939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
@@ -570,7 +571,7 @@ Commands & Mem. Append (ms) & SQL Append (ms) & Mem. Get (ms) & SQL Get (ms) \\
 \end{tabular}
 \end{center}
 
-SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms for 10,000 commands), which is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
+SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms for 10,000 commands), as shown in Figure~\ref{fig:backends}; this is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
 
 \begin{figure}[h]
 \centering
@@ -605,6 +606,7 @@ SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms
 \end{axis}
 \end{tikzpicture}
 \caption{SQLite append is $\sim$250$\times$ slower than in-memory due to ACID disk writes; both scale linearly.}
+\label{fig:backends}
 \end{figure}
 
 \subsection{Conflict Detection Overhead}
@@ -625,7 +627,7 @@ Conflict rate & Time (ms) & Throughput (cmd/s) & Applied \\
 \end{tabular}
 \end{center}
 
-Throughput varies by less than 20\% across the full range of conflict rates. Higher conflict rates are marginally faster because rejected commands skip the database write step. This confirms that the version check and classification logic add negligible overhead and that the system degrades gracefully under adversarial conflict conditions.
+Throughput varies by less than 20\% across the full range of conflict rates (Figure~\ref{fig:conflicts}). Higher conflict rates are marginally faster because rejected commands skip the database write step. This confirms that the version check and classification logic add negligible overhead and that the system degrades gracefully under adversarial conflict conditions.
 
 \begin{figure}[h]
 \centering
@@ -652,6 +654,7 @@ Throughput varies by less than 20\% across the full range of conflict rates. Hig
 \end{axis}
 \end{tikzpicture}
 \caption{Throughput remains within 20\% across all conflict rates, confirming conflict detection adds negligible overhead.}
+\label{fig:conflicts}
 \end{figure}
 
 \subsection{Full Offline Session Round-Trip}
@@ -671,7 +674,7 @@ Commands & Append (ms) & GetPending (ms) & ReplayAll (ms) & Total (ms) \\
 \end{tabular}
 \end{center}
 
-A full session of 10,000 commands completes in approximately 38 ms end-to-end. SQLite append accounts for roughly 80\% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
+A full session of 10,000 commands completes in approximately 38 ms end-to-end (Figure~\ref{fig:roundtrip}). SQLite append accounts for roughly 80\% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
 
 \begin{figure}[h]
 \centering
@@ -705,6 +708,7 @@ A full session of 10,000 commands completes in approximately 38 ms end-to-end. S
 \end{axis}
 \end{tikzpicture}
 \caption{Full offline session cost broken down by phase; SQLite append dominates at $\sim$80\% of total time.}
+\label{fig:roundtrip}
 \end{figure}
 
 \subsection{Command Log Disk Footprint}
@@ -729,7 +733,7 @@ The per-command cost stabilizes at approximately 128 bytes for logs of 1,000 com
 
 The high per-command cost at small log sizes (327 bytes at 100 commands) is a consequence of SQLite's fixed page size of 4 KB: even a single-row database occupies at least two pages — one for the data table and one for the unique index. Once the log grows large enough to fill pages efficiently the overhead drops to the steady-state figure.
 
-In practical terms, a 1,000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10,000 commands occupies approximately 1.2 MB. These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
+In practical terms, a 1,000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10,000 commands occupies approximately 1.2 MB (Figure~\ref{fig:diskfootprint}). These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
 
 \begin{figure}[h]
 \centering
@@ -758,6 +762,7 @@ In practical terms, a 1,000-command offline session — already a large session 
 \end{axis}
 \end{tikzpicture}
 \caption{Command log file size grows linearly with command count; 10{,}000 commands occupy $\sim$1.2 MB.}
+\label{fig:diskfootprint}
 \end{figure}
 
 \newpage
