@@ -95,7 +95,7 @@ Many gamers prefer to play offline, but might want to connect online as they adv
 
 The following research statement is investigated:
 
-\subsection*{How can a offline-online synchronization system for game persistence targeting survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?}
+\subsection*{How can an offline-online synchronization system for game persistence targeting survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?}
 
 \newpage
 
@@ -125,9 +125,9 @@ Alternative solutions to the research question are briefly discussed in Section~
 
 Several games available on the market have tried to solve the problem of syncing game data between playing offline and online. The game's developers do not typically disclose how they do it.
 
-Valheim \autocite{valheim} uses SQLite to store its world state locally on player's machines for offline sessions. The entire saved game is found in \texttt{world.db}. SQLite makes the game fully playable offline, but there is no functionality to merge databases. If two players host separate copies of the same world while disconnected, there is no supported way to rejoin and merge the session differences. This is the snapshot problem described in Section~\ref{sec:challenges}. SQLite makes it straightforward to implement single-player sessions but rejoining an online session with SQLite only introduces challenges regarding cheating and consistency.
+Valheim \autocite{valheim} uses SQLite to store its world state locally on player's machines. The entire saved game is found in \texttt{world.db}. SQLite makes the game fully playable offline. However, if two players host separate copies of the same world while disconnected, there is no supported way to rejoin and merge the database differences. This is the snapshot problem described in Section~\ref{sec:challenges}. SQLite makes it straightforward to implement single-player sessions but rejoining an online session with SQLite introduces challenges regarding cheating and consistency.
 
-Steam Cloud Save \autocite{steamcloud} enables folders and files to be synchronized between computers. The save data is uploaded and downloaded when players connect to Steam. Conflicts are resolved by making the most recently modified file the one which is stored on the server, a last-write-wins system. This approach is simple and adequate for single-player games, but cannot handle merging modifications from multiple players.
+Steam Cloud Save \autocite{steamcloud} enables folders and files to be synchronized between computers by hosting them on Valve's servers. The save data is uploaded and downloaded when players connect to Steam. Conflicts are resolved by making the most recently modified file the one which is stored on the server, a last-write-wins system. This approach is simple and adequate for single-player games, but cannot handle merging modifications from multiple players.
 
 World of Warcraft \autocite{wow} is one of the earliest and largest-scale examples of a persistent multiplayer world built on a purely server-authoritative model. All world state — character progression, item ownership, guild dynamics — lives exclusively on Blizzard's servers, making offline play neither supported nor meaningful. When Blizzard shut down legacy vanilla servers in 2016, the entire game history of those worlds was lost to players, illustrating the preservation problem discussed in Section~\ref{sec:discussion} with particular clarity.
 
@@ -916,7 +916,7 @@ Several directions for future investigation emerge from the limitations identifi
 \section{Conclusion}
 \label{sec:conclusion}
 
-This thesis investigated the following research question: How can a offline-online synchronization system for game persistence targeting survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?
+This thesis investigated the following research question: How can an offline-online synchronization system for game persistence targeting survival multiplayer games be designed and evaluated with respect to consistency, conflict resolution, and reconnection performance?
 
 The starting point was a server-authoritative persistence architecture in which all state changes are executed as transactional SQL operations against a centralized cloud backend. While robust in fully online environments, this model assumes continuous connectivity and does not support offline progression or hybrid play modes. Enabling offline functionality therefore requires architectural changes that preserve data integrity while allowing temporary divergence of state.
 
