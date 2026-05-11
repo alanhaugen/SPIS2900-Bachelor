@@ -226,7 +226,8 @@ This approach introduces several advantages:
   \item Commands are easy to serializable and can be stored locally.
   \item Replaying commands enables deterministic reconstruction of state.
   \item The command log provides a history of offline actions.
-  \item The server-side transactional guarantees do not need to change and will be the same as before.
+  \item The server-side transaction logic does not need to change at all.
+  \item Fraud detection can rely on the old system.
 \end{enumerate}
 
 By storing intent rather than state, the game will not diff to databases and merge them but instead achieves synchronization by executing state-modifying operations in order. See the listing below:
@@ -261,16 +262,16 @@ private:
 
 \subsection{Implementation considerations}
 
-This system must be designed with integrity guarantees in mind. Since commands are generated client-side and stored locally, a malicious client could potentially forge or alter commands before transmission. Every action must therefore be validated on the server before it is committed, and any command that produces an invalid or impossible state transition must be rejected. Conflict detection, entity versioning, and per-type resolution policies are addressed in the following subsection.
+Security considerations are important when dealing with online games, it is important to make sure players do not cheat and create false information. This system must be designed to be secure. The suggested system allows commands to be generated client-side and stored locally. A malicious client could potentially create or alter commands and add them to the local queue before transmission to the server. Every command must therefore be validated server-side before a transaction is committed, and any command that produces an invalid or impossible state transition must be rejected. Conflict detection, entity versioning, and per-type resolution policies are addressed in the following subsection.
 
-Beyond conflict handling, two additional concerns must be managed. First, ordering guarantees: the command log must preserve the sequence in which actions were taken offline, and the server must replay them in that order to ensure deterministic results. Second, idempotency and duplicate detection: if a replay attempt fails partway through or a command is transmitted more than once, the server must be able to identify and skip already-applied commands. The idempotency key stored on each command serves this purpose.
+Two other concerns need to be addressed as well. The first one is ordering guarantees: the command log must always represent a sequence of commands in in the order they were taken while offline. The server must replay them in that order to ensure deterministic results. Second, idempotency. If the same command is added twice, which could happen due to bugs in the gameplay code or unexpected player behaviour, or if the execution of a command fails, the server must be able recover and skip said commands. The idempotency key found in the command-struct (see listing above) serves this purpose.
 
-A remaining open concern is command dependency on server-side state that changed during the offline session. If an offline command assumed the existence of an entity that was deleted by another player while the client was disconnected, the command cannot be applied even if its version check would otherwise pass. Handling such cases requires pre-condition checks on the server that go beyond version comparison, and the rejection manifest provides the mechanism for communicating these failures back to the client.
+Lastly, what should the server do if commands depend on entities which have been removed on the server-side? If an offline command expects an entity to exist which has been deleted by another player during an online session, the commands will no longer make sense. Handling this requires more than simple version-checks, the game will need to be able to provide a rejection manifest of items or structures which could not be applied to the online database due to divergence in the online game state of the game world.
 
 \subsection{Conflict Resolution Strategy}
 \label{sec:conflictresolution}
 
-When offline commands are replayed against the authoritative server, conflicts arise when the server state has diverged from the state against which those commands were originally generated. A command that was valid at the time of creation may produce an invalid or inconsistent state transition when applied to an evolved world.
+When offline commands are replayed against the authoritative server, conflicts can arise. When the server state diverges from the state the offline player world state, the commands generated might need to be rejected. As the game world evolves and diverges online, commands generated during offline sessions could become invalid or inconsistent with the state on the server and will not transition to the online server during a reconnection online. Ways to handle this are explored next:
 
 \subsubsection{Conflict Detection via Entity Versioning}
 
