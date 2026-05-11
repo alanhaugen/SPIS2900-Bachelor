@@ -196,15 +196,15 @@ Since all actions that will change the database data are executed as remote tran
 
 In a purely server-authoritative model, the client does have a local database of the world state. While a temporary state may exist in memory during a session before being transmitted to an online server, durable storage is managed exclusively by remote infrastructure. This prevents local world progression during disconnection and support for local cooperative play modes becomes difficult to implement. Implementing a local persistence layer, such as the SQLite-backed DBI described in Section~\ref{sec:sqliteimp}, enables progress to persist across by writing state to disk which will allow offline sessions.
 
-A server-authoritative architecture assumes a single linear progression of state changes and does not accommodate concurrent or divergent modifications in separate environments. For example, both an offline client and the live server may modify the same entity independently. As a result, such architectures usually lack:
+A server-authoritative architecture expects all state changes to happen linearly and does not allow modifications from offline sessions. For example, both offline players and the live server may modify the same entity independently. As a result, such architectures usually lack:
 
 \begin{enumerate}
-  \item \textbf{Version tracking mechanisms}: Without a record of which version of an entity a player acted on, it is impossible to determine whether a subsequent action was based on outdated information.
-  \item \textbf{Conflict identification strategies}: Without version tracking, there is no reliable method to identify when two independent modifications have targeted the same entity in incompatible ways.
-  \item \textbf{Deterministic merge policies}: Even when a conflict is detected, a defined rule for resolution is required. Approaches such as last-write-wins, rejection, or type-specific merging each produce different outcomes for the player.
+  \item \textbf{Entity version tracking}: Without having a way to know which version of an entity a player has acted on, it is impossible to determine whether the action has happened on outdated information.
+  \item \textbf{Conflict identification}: Without entity version tracking it is not possible to detect conflicts which occur when two or more players modify the same entity in conflicting ways.
+  \item \textbf{Deterministic merging}: When a conflict has been detected, conflict resolution must take place. An authorative server typically has no rules for such an action when all actions happen in transactions: last-write-wins, action rejection, or type-specific merging can be implemented to support offline sessions.
 \end{enumerate}
 
-Without these components, safe synchronization of locally modified state with cloud-based state is not possible. The version-based conflict recognition and command classification strategy described in Section~\ref{sec:conflictresolution} directly addresses all three gaps.
+Without the above points, synchronization of locally modified state with cloud-based state is not possible. The version-based conflict recognition and command classification strategy described in Section~\ref{sec:conflictresolution} addresses all three gaps.
 
 \newpage
 
@@ -214,34 +214,34 @@ Without these components, safe synchronization of locally modified state with cl
 \subsection{Command-Based State Replication}
 \label{sec:commandbased}
 
-To enable offline progression while preserving compatibility with a server-authoritative model, this thesis proposes a command-based persistence mechanism inspired by the Command Pattern as described in Design Patterns: Elements of Reusable Object-Oriented Software \autocite{gamma1994design} and further discussed in Game Programming Patterns \autocite{nystrom2014game}.
+To enable offline progression without completely redesigning the server-authoritative model, this thesis proposes a command-based persistence model inspired by the Command Pattern as originally described in Design Patterns: Elements of Reusable Object-Oriented Software \autocite{gamma1994design} and presented specifically for games development in Game Programming Patterns \autocite{nystrom2014game}.
 
-Rather than directly modifying persistent state in the cloud, player actions are encapsulated as serializable command objects. Each command represents an intention to modify game state (e.g., create building, transfer item, complete quest) along with the necessary parameters to execute the modification.
+Rather than directly transmitting changes to the cloud-based database, during offline sessions the player actions are encapsulated as serializable command objects. Each command represents an intention instead of just a state change. An action is for example to create a building, transfer an item, complete a quest or place map marker. A command will also have parameters which allows the server to convert the command into a SQL modification which can be executed on the server when the player reconnects online.
 
-During offline gameplay, commands are appended to a durable local command log instead of being transmitted immediately to the server. When connectivity is restored, the queued commands are transmitted sequentially to the authoritative backend infrastructure and executed as transactional operations.
+In other words, during an offlie session commands are appended to a local command log. The commands are not transmitted immediately to the server. When connectivity is restored, the queued commands are transmitted sequentially to the authoritative backend cloud-server and executed as transactional operations.
 
 This approach introduces several advantages:
 
 \begin{enumerate}
-  \item Commands are naturally serializable and can be stored locally.
-  \item Replay of commands enables deterministic reconstruction of state.
+  \item Commands are easy to serializable and can be stored locally.
+  \item Replaying commands enables deterministic reconstruction of state.
   \item The command log provides a history of offline actions.
-  \item Existing server-side transactional guarantees can remain unchanged.
+  \item The server-side transactional guarantees do not need to change and will be the same as before.
 \end{enumerate}
 
-By storing intent rather than derived state, the system avoids directly merging divergent world snapshots and instead synchronizes through ordered execution of state-modifying operations. See the listing below:
+By storing intent rather than state, the game will not diff to databases and merge them but instead achieves synchronization by executing state-modifying operations in order. See the listing below:
 
 \newpage
 
 \begin{lstlisting}[language=C++, caption={Command structure and local command log}]
 struct Command
 {
-    std::string type;            // e.g. "CreateBuilding", "ResourceDelta"
+    std::string type;            // e.g. "CreateBuilding", "AddMoney"
     int64_t     timestamp;       // UTC milliseconds at time of action
     std::string idempotencyKey;  // UUID to detect duplicate replays
     std::string entityId;        // ID of the affected entity
     int32_t     expectedVersion; // entity version at command creation
-    int32_t     delta;           // signed delta for commutative operations
+    int32_t     delta;           // delta for commutative operations
 };
 
 class CommandLog
