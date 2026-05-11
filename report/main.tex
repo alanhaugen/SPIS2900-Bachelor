@@ -147,7 +147,7 @@ Event sourcing \autocite{fowler2005eventsourcing} is a software architecture pat
 
 The conflict resolution strategy, which uses entity versioning and optimistic concurrency control, follows the approach described by Bernstein and Goodman \autocite{bernstein1981concurrency}. Here, transactions validate the legality of actions at commit time rather than acquiring locks upfront. It is typical to make data consistent by relying on mutexes: a thread or process is given an exclusive lock before modifying shared state, blocking all other writes until the lock is released. This works well when everyone is continuously connected to an online server, but for offline sessions holding a lock while disconnected would stall the entire system. Optimistic concurrency control solves this by allowing offline progress to proceed freely and doing conflict detection when users reconnect to the server. This is why the conflict resolution from Bernstein and Goodman becomes a natural fit for the Command-based offline–online model presented in this thesis.
 
-Kleppmann et al.\ \autocite{kleppmann2019local} calls software which should work offline a \emph{local-first} software problem: applications should keep data locally, not on the cloud, and remain fully functional without a network connection. Synchronization with collaborators or cloud services should only occur when the user is ready and connects online. The command log approach proposed in this thesis is a \emph{local-first} problem designed to be compatible with survival multiplayer games. The commandlog operates on persistent shared world state that is shared among many players. In the model presented in this thesis, an authoritative server must eventually become the final source of truth.
+Kleppmann et al.\ \autocite{kleppmann2019local} calls software which should work offline a \emph{local-first} software problem: applications should keep data locally, not on the cloud, and remain fully functional without a network connection. Synchronization with collaborators or cloud services should only occur when the user is ready and connects online. The command log approach proposed in this thesis is a \emph{local-first} problem designed to be compatible with survival multiplayer games. The commandlog operates on persistent state that is shared by many players. In the model presented in this thesis, an authoritative server must eventually become the final source of truth.
 
 Moll et al. \autocite{MOLL2021107723} present a quadtree-based protocol to sync game state across server clusters, so called Named Data Networking. While they focus on inter-server sync rather than offline play, they show that region-based naming and decoupled representations can cut the overhead of keeping distributed states consistent. A concern related to the scalability dimension of the problem addressed later in the thesis in Section~\ref{sec:scale}.
 
@@ -218,7 +218,7 @@ To enable offline progression without completely redesigning the server-authorit
 
 Rather than directly transmitting changes to the cloud-based database, during offline sessions the player actions are encapsulated as serializable command objects. Each command represents an intention instead of just a state change. An action is for example to create a building, transfer an item, complete a quest or place map marker. A command will also have parameters which allows the server to convert the command into a SQL modification which can be executed on the server when the player reconnects online.
 
-In other words, during an offlie session commands are appended to a local command log. The commands are not transmitted immediately to the server. When connectivity is restored, the queued commands are transmitted sequentially to the authoritative backend cloud-server and executed as transactional operations.
+In other words, during an offline session commands are appended to a local command log. The commands are not transmitted immediately to the server. When connectivity is restored, the queued commands are transmitted sequentially to the authoritative backend cloud-server and executed as transactional operations.
 
 This approach introduces several advantages:
 
@@ -275,23 +275,23 @@ When offline commands are replayed against the authoritative server, conflicts c
 
 \subsubsection{Conflict Detection via Entity Versioning}
 
-Each persistent entity (e.g.\ a building, an inventory slot, or a faction) is assigned a monotonically increasing version number that is incremented with every committed state change. When a command is generated offline, the version of each affected entity is recorded alongside the command parameters. Upon replay, the server compares the recorded version against the current entity version. A mismatch indicates that the entity was modified after the command was issued, signalling a potential conflict.
+Each persistent entity in the database (inventory item slot, map marker, quest, building, etc.) is assigned an ever-increasing version number. This is called a monotonically incremented number which increases with every committed state change. This is the expectedVersion field in the listing above. When a command is generated offline, it will look into the local database for the version of the entity the player has manipulated and add it to the command. When the player reconnects and the commands are replayed, the server will compare the recorded version against the current entity version. The online version number will increase and go out of sync with the offline version number if other players have manipulated the same object, and conflict resolution can take place, for example the command can be rejected.
 
-This mechanism mirrors optimistic concurrency control (OCC) in traditional database systems, where transactions proceed without locking but are validated at commit time \autocite{bernstein1981concurrency}.
+This is very similar to Optimistic Concurrency Control (OCC) which is used in traditional database systems. Transactions proceed without locking but are validated at commit time \autocite{bernstein1981concurrency}.
 
 \subsubsection{Command Classification}
 
-Not all version mismatches require rejection. Commands can be classified by their conflict behaviour:
+Just because entity versions do not match between local and server sessions, the command does not necessarily need to be rejected. Commands have different types and different conflict resolution strategies:
 
 \begin{enumerate}
-  \item \textbf{Idempotent commands} — Quest completion, achievement unlocks, and similar one-time flags. These produce the same result regardless of how many times they are applied and can be safely replayed unconditionally.
-  \item \textbf{Commutative commands} — Additive operations such as resource collection or faction reputation deltas. Because the order of application does not affect the final value, these can be merged without conflict by summing the deltas.
-  \item \textbf{Non-commutative commands} — Destructive or positional operations such as demolishing a building or placing a structure on a specific grid cell. These depend on preconditions that may have been invalidated by independent server-side changes.
+  \item \textbf{Idempotent commands} — Quest completion, achievement unlocks, and similar boolean flags. These produce the same result regardless of how many times they are applied and can be safely replayed without harm.
+  \item \textbf{Commutative commands} — Additive operations such as resource collection, experience points, or money deltas. The order does not change the final value. These commands can simply have their deltas summed together with the existing entity.
+  \item \textbf{Non-commutative commands} — Spatial operations or building related such as destroying a building or placement of a vehicle. These need to be rejected and communicated to the reconnecting player if there is a conflict with server entities.
 \end{enumerate}
 
 \subsubsection{Resolution Policies}
 
-For each conflict class, a deterministic resolution policy is applied server-side before any command is committed. See listing below:
+For each conflict type a deterministic resolution must take place on the server before the command is committed. See listing below:
 
 \begin{lstlisting}[language=C++, caption={Server-side command validation and conflict resolution}]
 ReplayResult ReplayCommand(const Command& cmd, Database& db,
@@ -302,7 +302,7 @@ ReplayResult ReplayCommand(const Command& cmd, Database& db,
         return ReplayResult::Duplicate;
 
     // Commutative: apply delta regardless of entity version
-    if (cmd.type == "ResourceDelta" || cmd.type == "ReputationDelta")
+    if (cmd.type == "MoneyDelta")
         return db.ApplyDelta(cmd);
 
     // Non-commutative: validate entity state before committing
