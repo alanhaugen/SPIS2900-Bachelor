@@ -69,9 +69,9 @@ I would like to thank my mentor, Tord Sindre Trøen, for helping me grow as a pr
 
 I would also like to thank Maria Esperanza Johnson Ruiz for her continued support throughout the course. I am grateful to Andreas Aasom Brandsnes, who has been an excellent collaborator and a kind friend on past projects. I would further like to thank Håvard Vibeto at the University of Inland Norway, Fredrik Martol at Funcom, and the Funcom Core Engine Team for giving me the opportunity to experience game development within a cutting-edge studio environment.
 
-AI has been used to help drafting prose, structuring arguments, and assisting with the implementation. Design decisions, benchmark data, and conclusions are my own.
-
 I would also like to thank my academic advisor at the University of Inland Norway, Ole Einar Flaten, who teaches 3D programming and game engine development—two of my primary areas of interest. His feedback and academic guidance have been invaluable throughout the thesis process, as well as during the internship period from 15 January to 13 May 2026.
+
+AI has been used to help drafting prose, structuring arguments, and assisting with the implementation. Design decisions, benchmark data, and conclusions are my own.
 
 \newpage
 
@@ -190,11 +190,11 @@ public:
 
 \subsection{Limitations of Server-Authoritative Architectures}
 
-A server-authoritative persistence architecture requires continuous internet connectivity to a centralized cloud-based server. Although this model guarantees world consistency for all players in online multiplayer games, it entails significant drawbacks when applied to offline or hybrid scenarios:
+A server-authoritative persistence architecture requires continuous internet connectivity to a centralized cloud-based server. Although this model is good for consistency, all players in online game will without question see the same data and be in the same world, it entails significant drawbacks when developers want to support offline or hybrid offline-online game modes:
 
-Since all state-modifying actions are executed as remote transactions, gameplay cannot progress without server access. This requirement entirely prevents offline play and restricts deployment flexibility on platforms where online access is limited or requires a paid subscription. If a player loses internet connectivity mid-session, whether due to router failure, mobile network dropout, or server maintenance, gameplay cannot continue. Any progress made while offline is lost, the client has no way to queue actions for later submission. For players from regions with unreliable internet connectivity, the game becomes more or less inaccessible. The combined architecture described in Section~\ref{sec:architecture} tackles these limitations by decoupling action generation from action transmission.
+Since all actions that will change the database data are executed as remote transactions, gameplay cannot progress without server access. This makes offline play impossible. If the online service is shut down, the game will no longer function. It also becomes more difficult to deploy the game on platforms where online access requires a paid subscription. If a player loses internet connectivity mid-session, for example due to server maintenance, gameplay cannot continue. The client has no way to queue actions for later submission. For players from regions with unreliable internet connectivity, the game becomes more or less inaccessible. The combined architecture described in Section~\ref{sec:architecture} tackles these limitations by decoupling action generation from action transmission.
 
-In a purely server-authoritative model, the client does not maintain an authoritative local model of persistent world state. While a temporary state may exist in memory during a session, durable storage is managed exclusively by the remote infrastructure. This design prevents local world progression during disconnection and complicates support for local cooperative play modes. Implementing a local persistence layer, such as the SQLite-backed DBI described in Section~\ref{sec:sqliteimp}, enables progress to persist across process termination by writing state to disk before the server confirms.
+In a purely server-authoritative model, the client does have a local database of the world state. While a temporary state may exist in memory during a session before being transmitted to an online server, durable storage is managed exclusively by remote infrastructure. This prevents local world progression during disconnection and support for local cooperative play modes becomes difficult to implement. Implementing a local persistence layer, such as the SQLite-backed DBI described in Section~\ref{sec:sqliteimp}, enables progress to persist across by writing state to disk which will allow offline sessions.
 
 A server-authoritative architecture assumes a single linear progression of state changes and does not accommodate concurrent or divergent modifications in separate environments. For example, both an offline client and the live server may modify the same entity independently. As a result, such architectures usually lack:
 
