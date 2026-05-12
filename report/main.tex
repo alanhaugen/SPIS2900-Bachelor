@@ -111,12 +111,7 @@ The research is conducted in three phases. First, an existing authoritative-serv
 
 The second phase is design: a hybrid architecture derived from the Command-Pattern is developed. The architecture takes into account conflict resolution strategies, and suggests a way to make it work with different database backends. Design decisions are presented in Section~\ref{sec:architecture}.
 
-The third stage is evaluation. The C++ prototype is tested against two requirements:
-
-\begin{enumerate}
-\item Correctness, tests written with the Catch2 framework \autocite{catch2} attempts to check if the implementation functions correctly. 
-\item Performance, several measurements are made in regard to replay throughput, command log disk-size, conflict detection overhead, internet reliability effects and the end-to-end cost of a full offline session. The results are later discussed.
-\end{enumerate}
+The third stage is evaluation. The C++ prototype is tested against two requirements, correctness and performance. Tests have been written to make sure the prototype works as intended. Also, measurements have been made on how the prototype performs in regards to command log disk-size, conflict detection overhead, internet reliability and the performance cost of a full offline session.
 
 Alternative solutions to the research question are briefly discussed in Section~\ref{sec:alt}. The evaluation is described further in Section~\ref{sec:evaluation}. The results are discussed in Section~\ref{sec:discussion} and future work is touched upon in Section~\ref{sec:futurework}. Finally, a conclusion is made in Section~\ref{sec:conclusion}.
 
@@ -133,7 +128,7 @@ Valheim \autocite{valheim} uses SQLite to store its world state locally on playe
 
 Steam Cloud Save \autocite{steamcloud} enables folders and files to be synchronized between computers by hosting them on Valve's servers. The save data is uploaded and downloaded when players connect to Steam. Conflicts are resolved by making the most recently modified file the one which is stored on the server, a last-write-wins system. This approach is simple and adequate for single-player games, but cannot handle merging modifications from multiple players.
 
-World of Warcraft \autocite{wow} is one of the earliest examples of a MMO which is based on the server-authoritative model. All of the persistant game state is stored on Blizzard's servers. All items, character properties, quests and guild information is stored remotely. When Blizzard stopped the legacy vanilla servers in 2016, all the game data, the characters, player progression, everything done in the game world was lost, which is another example of the preservation problem discussed in Section~\ref{sec:discussion}.
+World of Warcraft \autocite{wow} is one of the earliest examples of a MMO which is based on the server-authoritative model. All of the persistent game state is stored on Blizzard's servers. All items, character properties, quests and guild information is stored remotely. When Blizzard stopped the legacy vanilla servers in 2016, all the game data, the characters, player progression, everything done in the game world was lost, which is another example of the preservation problem discussed in Section~\ref{sec:discussion}.
 
 Blizzard Entertainment's Diablo III \autocite{diablo3} required online connectivity to the Battle.net service even for solo gameplay, their new game required all character state to be stored and validated server-side. At launch in 2012 server overload made the game completely unplayable despite no multiplayer interaction being involved. This is widely referred to as "Error 37" and illustrates how the purely server-authoritative model can fail. If the game depends entirely on the availability of the developer's infrastructure, regardless of whether the player is interacting with others, the game becomes unplayable if the developers have server problems.
 
@@ -304,7 +299,7 @@ ReplayResult ReplayCommand(const Command& cmd, Database& db,
         return ReplayResult::Duplicate;
 
     // Commutative: apply delta regardless of entity version
-    if (cmd.type == "ResourceDelta" || "ReputationDelta")
+    if (cmd.type == "ResourceDelta" || cmd.type == "ReputationDelta")
         return db.ApplyDelta(cmd);
 
     // Non-commutative: validate entity state before committing
@@ -576,7 +571,7 @@ Commands & Mem. Append (ms) & SQL Append (ms) & Mem. Get (ms) & SQL Get (ms) \\
 \end{tabular}
 \end{center}
 
-SQLite append is approximately 250 times slower than in-memory (33 ms vs 0,13 ms for 10,000 commands), as shown in Figure~\ref{fig:backends}; this is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
+SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms for 10,000 commands), as shown in Figure~\ref{fig:backends}; this is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
 
 \begin{figure}[h]
 \centering
@@ -738,7 +733,7 @@ The per-command cost stabilizes at approximately 128 bytes for logs of 1000 comm
 
 The high per-command cost at small log sizes (327 bytes at 100 commands) is a consequence of SQLite's fixed page size of 4 KB: even a single-row database occupies at least two pages — one for the data table and one for the unique index. Once the log grows large enough to fill pages efficiently the overhead drops to the steady-state figure.
 
-In practical terms, a 1.000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10.000 commands occupies approximately 1.2 MB (Figure~\ref{fig:diskfootprint}). These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
+In practical terms, a 1,000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10,000 commands occupies approximately 1.2 MB (Figure~\ref{fig:diskfootprint}). These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
 
 \begin{figure}[h]
 \centering
@@ -808,7 +803,7 @@ Poor mobile  & 10,000 & 40.22 & 315.79 & 356.01 \\
 \end{tabular}
 \end{center}
 
-For small logs (100 commands), the local cost is negligible at 0,5 ms; reconnection time is dominated almost entirely by network latency regardless of log size. Even on a poor mobile connection (300 ms RTT, 5\% loss), a 10,000-command log synchronizes in approximately 356 ms — well under half a second for what is already an unrealistically large offline session. Figure~\ref{fig:network} visualises the local–network breakdown for the 10,000-command case.
+For small logs (100 commands), the local cost is negligible at 0.5 ms; reconnection time is dominated almost entirely by network latency regardless of log size. Even on a poor mobile connection (300 ms RTT, 5\% loss), a 10,000-command log synchronizes in approximately 356 ms — well under half a second for what is already an unrealistically large offline session. Figure~\ref{fig:network} visualises the local–network breakdown for the 10,000-command case.
 
 \begin{figure}[h]
 \centering
@@ -919,13 +914,13 @@ This thesis investigated the following research question: How can an offline-onl
 
 While considering this problem, the starting point was to analyze the weaknesses and strengths of a typical server-authoritative persistence model. In such a model, state changes are all done as transactional SQL commands against a centralized cloud backend. This is a robust persistence model implementation, with consistency guarantees. It does not allow offline player progression, however. With a server-authoritative model, there is no offline or local multiplayer game modes. To enable offline play, it is therefore important to find a way to handle divergent world state.
 
-Two offline-only models were discussed, and evaluated before arriving at the suggested command-based design. The simplest way to make offline functionality in a game with a server-authoritative persistence model is to simply mirror the online database with a local SQLite database. To do this one should provide a consistent programming interface for persistence, a Database Interface (DBI) which routes all persistence logic to the right place. The persistence interface does not by itself know how to reconcile divergent state which occur during an offline session, complicating reconnecting online after playing solo. Another model considered was an Object–Relational Mapping layer. This model would not solve reconnection to an online service either. The model was eventually rejected due to a fundamental mismatch: an ORM tracks object state, the commandlog design tracks intent.
+Two offline-only models were discussed, and evaluated before arriving at the suggested command-based design. The simplest way to make offline functionality in a game with a server-authoritative persistence model is to simply mirror the online database with a local SQLite database. To do this one should provide a consistent programming interface for persistence, a Database Interface (DBI) which routes all persistence logic to the right place. The persistence interface does not by itself know how to reconcile divergent state which occurs during an offline session, complicating reconnecting online after playing solo. Another model considered was an Object–Relational Mapping layer. This model would not solve reconnection to an online service either. The model was eventually rejected due to a fundamental mismatch: an ORM tracks object state, the commandlog design tracks intent.
 
 The proposed solution is a command-based replication model. Rather than attempting to synchronize static snapshots of two databases on reconnection online, the commandlog system records player intent as serializable commands that can be replayed on the authoritative server. This system does not say what the changes should be, but instead why the changes should happen. The commandlog system solves all three parts of the research question as follows:
 
 \textbf{Consistency} is maintained by leaving the cloud server as the single authoritative source of truth. Offline commands are not committed to the server before they have been sent and validated server-side. Since each Command can translate into a DBI call, the same transactions can be applied during reconnection as during an online session. 
 
-\textbf{Conflict resolution} is the most important part of this design and is handled by classifying objects into three types. Furthermore, when the player goes offline, entity versioning is used to detect divergent state. The three types of commands are idempotent commands, which can be applied safely without rejection, commutative operations such as resource collection or experience points gained which can be merged via simple summation, and non-commutative operations, such as building a building or moving a vehicle, which needs to be either accepted or rejected server-side. Commands that are rejected will be sent and communicated to the player in a rejection manifest.
+\textbf{Conflict resolution} is the most important part of this design and is handled by classifying objects into three types. Furthermore, when the player goes offline, entity versioning is used to detect divergent state. The three types of commands are idempotent commands, which can be applied safely without rejection, commutative operations such as resource collection or experience points gained which can be merged via simple summation, and non-commutative operations, such as constructing a building or placing a vehicle, which need to be either accepted or rejected server-side. Commands that are rejected will be sent and communicated to the player in a rejection manifest.
 
 \textbf{Reconnection performance} was evaluated by running tests on a single machine, including a network latency model. A log of 10,000 commands was replayed on a simulated server system in under 2 ms in memory, and under 40 ms end-to-end including a more realistic SQLite persistence model. When network overhead is added, even a poor mobile connection (300 ms RTT, 5 \% packet loss) produces a total reconnection time of approximately 356 ms. Conflict detection adds less than 20 \% overhead regardless of conflict rate, and the command log file remains under 1.2 MB at 10,000 commands. The results show that the design itself is unlikely to cause bottlenecks when players reconnect to an online server.
 
