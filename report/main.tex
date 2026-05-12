@@ -71,6 +71,8 @@ I would also like to thank Maria Esperanza Johnson Ruiz for her continued suppor
 
 I would also like to thank my academic advisor at the University of Inland Norway, Ole Einar Flaten, who teaches 3D programming and game engine development—two of my primary areas of interest. His feedback and academic guidance have been invaluable throughout the thesis process, as well as during the internship period from 15 January to 13 May 2026.
 
+\section*{AI disclosure}
+
 AI has been used to help drafting prose, structuring arguments, and assisting with the implementation. Design decisions, benchmark data, and conclusions are my own.
 
 \newpage
@@ -87,7 +89,7 @@ AI has been used to help drafting prose, structuring arguments, and assisting wi
 
 \section{Introduction}
 
-This investigation considers a way to develop the persistence system of a modern large-scale survival multiplayer game. The design targets persistent multiplayer worlds shared by thousands of players, and are intended to support the storage of player progression, world state, and faction dynamics. The design is not concerned with ephemeral information such as player position or real-time combat replication; the focus is on long-term persistent data of the kind typically stored in centralized, cloud-hosted SQL databases.
+This investigation considers a way to develop the persistence system of a modern large-scale survival multiplayer game. The design targets persistent multiplayer worlds shared by thousands of players, and is intended to support the storage of player progression, world state, and faction dynamics. The design is not concerned with ephemeral information such as player position or real-time combat replication; the focus is on long-term persistent data of the kind typically stored in centralized, cloud-hosted SQL databases.
 
 The suggested design is intended to provide a way to support both offline and online functionality. Having the ability to make a game run offline is important, especially on console platforms where access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes, both splitscreen and local listen server setup, while preserving core gameplay mechanics.
 
@@ -103,17 +105,17 @@ The following research statement is investigated:
 
 \section{Methodology}
 
-A design science research approach \autocite{hevner2004design} has been adopted. In Design Science, the main product of the thesis is an artifact; in this project the artifacts are the architectural design of a save system and the actual implemented software prototype of the artifact. Instead of the empirical study, the software prototype is the main end product of the research.
+The thesis follows a Design Science approach \autocite{hevner2004design}. Instead of conducting empirical research, the goal of the thesis is to produce an artifact. In this case, the artifact is the architectural design of a save system and the actual implemented software prototype of the artifact.
 
-The research is conducted in three phases. The first stage is analysis: it involves analyzing existing, server authoritative persistence systems and identifying the problems associated with playing offline. This analysis is performed in Section~\ref{sec:challenges}.
+The research is conducted in three phases. First, an existing authoritative-server is analyzed. Authoritative persistence systems are typical for survival video-games and have strengths and weaknesses worth identifying. The goal of the analysis is to identify problems associated with playing offline. This analysis is performed in Section~\ref{sec:challenges}.
 
-Proposal for second stage design: a hybrid architecture derived from the Command Pattern, with conflict resolution, and showing how the design fits together with online SQL backends and a local SQLite store, is proposed. Design decisions are recorded in Section~\ref{sec:architecture}.
+The second phase is design: a hybrid architecture derived from the Command-Pattern is developed. The architecture takes into account conflict resolution strategies, and suggests a way to make it work with different database backends. Design decisions are presented in Section~\ref{sec:architecture}.
 
-The third stage is evaluation, implemented in C++, against two requirements:
+The third stage is evaluation. The C++ prototype is tested against two requirements:
 
 \begin{enumerate}
-\item Correctness, where all parts of the design are covered by automated unit and integration tests, written using the Catch2 framework \autocite{catch2}. 
-\item Performance, where the replay throughput, command log size limits, conflict detection overhead, and the end-to-end cost of a full offline session are measured using a suite of benchmark programs.
+\item Correctness, tests written with the Catch2 framework \autocite{catch2} attempts to check if the implementation functions correctly. 
+\item Performance, several measurements are made in regard to replay throughput, command log disk-size, conflict detection overhead, internet reliability effects and the end-to-end cost of a full offline session. The results are later discussed.
 \end{enumerate}
 
 Alternative solutions to the research question are briefly discussed in Section~\ref{sec:alt}. The evaluation is described further in Section~\ref{sec:evaluation}. The results are discussed in Section~\ref{sec:discussion} and future work is touched upon in Section~\ref{sec:futurework}. Finally, a conclusion is made in Section~\ref{sec:conclusion}.
@@ -141,7 +143,7 @@ Academic distributed systems literature has studied the problem and offers solut
 
 Conflict-free Replicated Data Types (CRDTs) \autocite{shapiro2011crdts} are data structures that can be replicated over several computers and can be changed immediately with a guarantee of eventual consistency with the other computers. Any two replicas can be merged out of order but will eventually give the same result on all computers. CRDTs would eliminate the need for conflict resolution policies entirely. However, the entire game would need to be redesigned. Every data type would have to adhere to CRDT semantics. This is a significant architectural investment. They are also better suited to data types like counters and sets than to the complex relational structures (buildings with positions, quest state, faction information, map markers) that survival games require.
 
-Operational Transformation (OT) \autocite{ellis1989ot}, the technique underlying WYSIWfS (what you see is what I see) editing tools such as Google Docs, transforms operations so that they can be applied out of order and still produce the same document. The intent-based approach is similar to the model in this thesis, commandlog shares similarities with OT. The command-based approach and OT both consider operations rather than snapshots. However, OT requires a central server to sequence and transform operations in real time. This is not possible during an offline play session.
+Operational Transformation (OT) \autocite{ellis1989ot}, the technique underlying editing tools such as Google Docs, transforms operations so that they can be applied out of order and still produce the same document. The intent-based approach is similar to the model in this thesis, commandlog shares similarities with OT. The command-based approach and OT both consider operations rather than snapshots. However, OT requires a central server to sequence and transform operations in real time. This is not possible during an offline play session.
 
 Event sourcing \autocite{fowler2005eventsourcing} is a software architecture pattern where the program state is constructed by unwinding an append-only log of events. The command log proposed in this thesis is very similar to this architecture: both record intent rather than state and both allow the current state to be reconstructed by replaying the log. The main difference is that event sourcing assumes a single authoritative log, whereas this thesis addresses what happens when two divergent logs (client offline, server online) must be merged.
 
@@ -221,7 +223,7 @@ In other words, during an offline session commands are appended to a local comma
 This approach introduces several advantages:
 
 \begin{enumerate}
-  \item Commands are easy to serializable and can be stored locally.
+  \item Commands are easy to serialize and can be stored locally.
   \item Replaying commands enables deterministic reconstruction of state.
   \item The command log provides a history of offline actions.
   \item The server-side transaction logic does not need to change at all.
@@ -262,7 +264,7 @@ private:
 
 Security considerations are important when dealing with online games, it is important to make sure players do not cheat and create false information. This system must be designed to be secure. The suggested system allows commands to be generated client-side and stored locally. A malicious client could potentially create or alter commands and add them to the local queue before transmission to the server. Every command must therefore be validated server-side before a transaction is committed, and any command that produces an invalid or impossible state transition must be rejected. Conflict detection, entity versioning, and per-type resolution policies are addressed in the following subsection.
 
-Two other concerns need to be addressed as well. The first one is ordering guarantees: the command log must always represent a sequence of commands in in the order they were taken while offline. The server must replay them in that order to ensure deterministic results. Second, idempotency. If the same command is added twice, which could happen due to bugs in the gameplay code or unexpected player behaviour, or if the execution of a command fails, the server must be able recover and skip said commands. The idempotency key found in the command-struct (see listing above) serves this purpose.
+Two other concerns need to be addressed as well. The first one is ordering guarantees: the command log must always represent a sequence of commands in the order they were taken while offline. The server must replay them in that order to ensure deterministic results. Second, idempotency. If the same command is added twice, which could happen due to bugs in the gameplay code or unexpected player behaviour, or if the execution of a command fails, the server must be able recover and skip said commands. The idempotency key found in the command-struct (see listing above) serves this purpose.
 
 Lastly, what should the server do if commands depend on entities which have been removed on the server-side? If an offline command expects an entity to exist which has been deleted by another player during an online session, the commands will no longer make sense. Handling this requires more than simple version-checks, the game will need to be able to provide a rejection manifest of items or structures which could not be applied to the online database due to divergence in the online game state of the game world.
 
@@ -373,7 +375,7 @@ Command type & DBI method & SQL pattern \\
 \end{tabular}
 \end{center}
 
-The above are some examples of SQL patterns which could be used for the commands. \texttt{INSERT OR IGNORE} is for idempotent commands, these can be called many times without changing the database state. With this duplicates from for example calling a Quest command many times, will be ignored. This is really just an extra fail-safe in-case the built-in idempotency detection in the ReplayCommand method fails. (\texttt{ON CONFLICT DO UPDATE SET value = value + excluded.value}) is for resource and reputation deltas, it simply adds the resource or reputation delta to the column. \texttt{BEGIN}/\texttt{COMMIT} is a transaction for \texttt{TransferItem}. Transactions like these ensures atomicity: either both succeed or neither does. This prevents an inventory item from being lost or getting duplicated in-case the transaction fails. For existing games one might already have a DBI implementation, each command must simply correspond to a DBI method.
+The above are some examples of SQL patterns which could be used for the commands. \texttt{INSERT OR IGNORE} is for idempotent commands, these can be called many times without changing the database state. With this duplicates from for example calling a Quest command many times, will be ignored. This is really just an extra fail-safe in case the built-in idempotency detection in the ReplayCommand method fails. (\texttt{ON CONFLICT DO UPDATE SET value = value + excluded.value}) is for resource and reputation deltas, it simply adds the resource or reputation delta to the column. \texttt{BEGIN}/\texttt{COMMIT} is a transaction for \texttt{TransferItem}. Transactions like these ensures atomicity: either both succeed or neither does. This prevents an inventory item from being lost or getting duplicated in case the transaction fails. For existing games one might already have a DBI implementation, each command must simply correspond to a DBI method.
 
 \subsection{Integration Possibilities}
 
@@ -395,9 +397,9 @@ std::unique_ptr<IDatabaseInterface> CreateDBI(bool isOnline)
 }
 \end{lstlisting}
 
-Game code calls DBI methods without concern of which backend has been created. The DBI has a common interface and can be swapped out. When the player rejoins an online session, the engine flushes command log by calling \texttt{ReplayAll}, this submits all the commands from the command queue to the authoritative server in the order they happened in the offline session and conflicts produce a \texttt{RejectionManifest} listing any commands that could not be applied. This list could be made accessible to the player after reconnection and a method to recover lost items or buildings could be implemented.
+Game code calls DBI methods without concern of which backend has been created. The DBI has a common interface and can be swapped out. When the player rejoins an online session, the engine flushes the command log by calling \texttt{ReplayAll}, this submits all the commands from the command queue to the authoritative server in the order they happened in the offline session and conflicts produce a \texttt{RejectionManifest} listing any commands that could not be applied. This list could be made accessible to the player after reconnection and a method to recover lost items or buildings could be implemented.
 
-Figure~\ref{fig:architecture} shows a flow chart of how the DBI system:
+Figure~\ref{fig:architecture} shows a flow chart of the data flow in the DBI system:
 
 \begin{figure}[h]
 \flushleft
@@ -462,7 +464,7 @@ The prototype includes 31 Catch2 unit tests covering the command log, idempotenc
 \section{Alternative State Replication Persistence Architectures}
 \label{sec:alt}
 
-Other simpler alternatives to the Command-Based State Replication have been considered and will be described and discussed below. Some of the problems with the alternative architectures revolve around not allowing players to reconnect online after an offline session due to state divergence (see section \ref{sec:sqliteimp}) and the added complexity of the implementation in addition to not solving the problem of allowing players reconnect online (see section \ref{sec:ormimp}).
+Other simpler alternatives to the Command-Based State Replication have been considered and will be described and discussed below. Some of the problems with the alternative architectures revolve around not allowing players to reconnect online after an offline session due to state divergence (see section \ref{sec:sqliteimp}) and the added complexity of the implementation in addition to not solving the problem of allowing players to reconnect online (see section \ref{sec:ormimp}).
 
 \subsection{Local Persistence via SQLite}
 \label{sec:sqliteimp}
@@ -484,13 +486,13 @@ This is why the command log is a necessary complement rather than an optional ad
 \subsection{ORM (Object-Relational Mapping)}
 \label{sec:ormimp}
 
-At the beginning of the project, an Object–Relational Mapping (ORM) system was considered for the project. An ORM is a reflection layer which allows objects to translate directly to SQL and back again. This is a technically interesting solution which would allow all persistent state (e.g., inventory items, buildings, quests, etc.) to automatically get translated into the database as they are manipulated on the client and to updated and reconstructed from relational data as well.
+At the beginning of the project, an Object–Relational Mapping (ORM) system was considered for the project. An ORM is a reflection layer which allows objects to translate directly to SQL and back again. This is a technically interesting solution which would allow all persistent state (e.g., inventory items, buildings, quests, etc.) to automatically get translated into the database as they are manipulated on the client and to update and reconstruct from relational data as well.
 
 ORM frameworks are not typical for C and C++ but are often seen in higher-level languages such as Python and Java. Languages with native reflection and dynamic typing make it much easier to implement runtime type inspection and to create SQL schema based on objects in memory. C++ does not have reflection and is statically typed, which makes it complicated to make a program to examine itself at runtime and add SQL serialization logic. However, a game engine like Unreal engine extends C++ with a reflection system, each object has extra information thanks to macros such as \texttt{USTRUCT} and \texttt{UCLASS} \autocite{unreal}. This system could be extended to support an ORM.
 
-The deeper problem, however, is a that the ORM model still does not solve synchronizing offline-online state. The command-based architecture proposed in this thesis is still the only solution presented which actually takes care of this problem. An ORM operates on \emph{state}: just like the SQLite-only implementation, it can only track which object fields have changed and generate SQL based on snapshots. The command log approach considers \emph{operations}: it logs player actions and intent, not the resulting world state only. These two models are philosophically opposed. If an ORM were used as the persistence layer, it would not generate a record of actions and would lose the intent that the command log gathers up for server-side replay. With ORM the server would only receive a snapshot of what changed, it would not be able to replay the actions in order and deal with conflict resolution in a straightforward manner. That might even be impossible with ORM.
+The deeper problem, however, is that the ORM model still does not solve synchronizing offline-online state. The command-based architecture proposed in this thesis is still the only solution presented which actually takes care of this problem. An ORM operates on \emph{state}: just like the SQLite-only implementation, it can only track which object fields have changed and generate SQL based on snapshots. The command log approach considers \emph{operations}: it logs player actions and intent, not the resulting world state only. These two models are philosophically opposed. If an ORM were used as the persistence layer, it would not generate a record of actions and would lose the intent that the command log gathers up for server-side replay. With ORM the server would only receive a snapshot of what changed, it would not be able to replay the actions in order and deal with conflict resolution in a straightforward manner. That might even be impossible with ORM.
 
-The DBI abstraction is already an excellent backend-agnostic abstraction, replacing it with ORM would simply add complexity. Game code should interact with a interface and should not be aware of the backend-implementation. The game code should not care if the game is running online, or if it is being used in an offline session. A great thing about the DBI is that is exposes all persistence methods in one place, such as (\texttt{TransferItem}, \texttt{CompleteQuest}), rather than having generic persistence in different places across the codebase. Without this, it becomes difficult to classify commands for conflict resolution. The DBI is a domain-specific and explicit, it is better suited than a generic ORM. A DBI is the best solution for a persistence system due to its simplicity and compatibility with existing authoritative server architectures.
+The DBI abstraction is already an excellent backend-agnostic abstraction, replacing it with ORM would simply add complexity. Game code should interact with an interface and should not be aware of the backend-implementation. The game code should not care if the game is running online, or if it is being used in an offline session. A great thing about the DBI is that it exposes all persistence methods in one place, such as (\texttt{TransferItem}, \texttt{CompleteQuest}), rather than having generic persistence in different places across the codebase. Without this, it becomes difficult to classify commands for conflict resolution. The DBI is domain-specific and explicit, it is better suited than a generic ORM. A DBI is the best solution for a persistence system due to its simplicity and compatibility with existing authoritative server architectures.
 
 \newpage
 
@@ -864,14 +866,14 @@ The conflict rate experiment shows something very useful: throughput varies by l
 
 Even on a bad mobile network (300 ms RTT, 5 \% packet loss), the network latency model indicates that a 10,000-command log takes about 356 ms end-to-end to reconnect. If players have a fast connection, for example with latency below 40 ms RTT, then the server-side processing becomes the bottleneck. With a slower connection with latency greater than 40 ms RTT, actually sending the commands to the server is the bottleneck. This shows that making the commandlog smaller by optimization is the best way to speed up reconnection with the server for players with fast internet connections. One could for example remove commutative commands where possible, by merging them together.
 
-During development, the benchmarking experiments revealed a major design flaw in the C++ implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} per Command. This triggered a linear search through the command queue. This was slow and produced O($n^2$) behaviour. Code review alone was not enough to discover this mistake: 50,000 commands took nearly 3 seconds process. After the fix, processing 50,000 commands took only 9 ms. This shows how important it is to do test-driven development, and to avoid adding tests and doing testing ad-hoc late in development.
+During development, the benchmarking experiments revealed a major design flaw in the C++ implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} per Command. This triggered a linear search through the command queue. This was slow and produced O($n^2$) behaviour. Code review alone was not enough to discover this mistake: 50,000 commands took nearly 3 seconds to process. After the fix, processing 50,000 commands took only 9 ms. This shows how important it is to do test-driven development, and to avoid adding tests and doing testing ad-hoc late in development.
 
 \subsection{Scalability Considerations}
 \label{sec:scale}
 
 The benchmarks are designed to show the performance of one client connected to the server at a time, which is not realistic on real-world servers. The benchmarks do not prove that the commandlog based implementation will scale well for thousands of players in a large-scale multiplayer game. There are many factors which go outside the scope of the current prototype which would affect the performance in a real-world environment.
 
-In the prototype, the server-side validation is done against an in-memory store. This is a great oversimplification. The database is used to store entity versions and preconditions, but should really use a real SQL database. To properly test the system, many concurrent users should add load to the system, not only one user as in the benchmark. Validation throughput would depend heavily on features of the database implementation. A SQL database is typically designed to operate under heavy load. The benchmarks do not test what would happen on real databases under a heavy workload. This is hard to test with synthetically. Real player behaviour is unpredictable. They could connect and reconnect in a more stochastic random manner. Connections could be occur suddenly at certain times of the day. This would change the conflict rates measurement and could cause behaviour which was not caught by the tests and experiments conducted for this thesis.
+In the prototype, the server-side validation is done against an in-memory store. This is a great oversimplification. The database is used to store entity versions and preconditions, but should really use a real SQL database. To properly test the system, many concurrent users should add load to the system, not only one user as in the benchmark. Validation throughput would depend heavily on features of the database implementation. A SQL database is typically designed to operate under heavy load. The benchmarks do not test what would happen on real databases under a heavy workload. This is hard to test synthetically. Real player behaviour is unpredictable. They could connect and reconnect in a more stochastic manner. Connections could occur suddenly at certain times of the day. This would change the conflict rates measurement and could cause behaviour which was not caught by the tests and experiments conducted for this thesis.
 
 However, despite these limitations, the core design of the commandlog offline-online synchronization model is still sound. But the benchmarks should not be used as proof of how the algorithms or model would perform in a real-world system.
 
@@ -887,11 +889,11 @@ Beyond the technical design, offline functionality has an important cultural sig
 
 \subsection{Financial Considerations}
 
-Offline capabilities also has practical consequences for both players and developers that extend beyond technical design.
+Offline capabilities also have practical consequences for both players and developers that extend beyond technical design.
 
 For players, playing online often requires an online subscription. PlayStation Plus, Xbox Game Pass Core, or Nintendo Switch Online all cost money, and are required for online play. Adding offline functionality to a game will get rid of such barriers, making the game available to a greater number of players \autocite{onlinegamers}. Many people do not play games online on console, so adding offline broadens the reachable audience without requiring any change to the online multiplayer experience for players who do subscribe to online services.
 
-Offline functionality has also got a monetary dimension for the developers as well. Running a large number of servers is expensive. An always online game with thousands of players must always be ready, even when players are not connected. Players expect the servers to be ready for them when they connect online. A hybrid architecture allows players to play offline without adding load to the servers. Thus, servers can be scaled down to the actual demand rather than being ready for any player who bought the game.
+Offline functionality also has a monetary dimension for the developers as well. Running a large number of servers is expensive. An always online game with thousands of players must always be ready, even when players are not connected. Players expect the servers to be ready for them when they connect online. A hybrid architecture allows players to play offline without adding load to the servers. Thus, servers can be scaled down to the actual demand rather than being ready for any player who bought the game.
 
 \newpage
 
@@ -904,7 +906,7 @@ There are many things this thesis did not explore with the C++ prototype, leavin
 
 \textbf{Production server-side scaling.} The current benchmarks did not use a real SQL database when simulating replay on the server-side. A production system would use an advanced and well tuned SQL database which would also be under stress from many concurrent connections and players enjoying the game. To properly consider the performance impact of the commandlog, the benchmark should use a system more similar to an actual production system under load.
 
-\textbf{Recovery paths for rejected commands.} The current design returns a manifest of all the rejected commands. However, a solution to resolving and allowing players to recover what they lose have not been made in this thesis. A production system would need a way to communicate to the player which commands failed, why, and offer compensation. This is a game design problem, and should be taken seriously per game.
+\textbf{Recovery paths for rejected commands.} The current design returns a manifest of all the rejected commands. However, a solution to resolving and allowing players to recover what they lose has not been made in this thesis. A production system would need a way to communicate to the player which commands failed, why, and offer compensation. This is a game design problem, and should be taken seriously per game.
 
 \textbf{Command dependency graphs.} Some commands might rely on previous commands succeeding from the offline commandlog. For example, upgrading a building would rely on the building being successfully built in the first place. If the building is rejected by the server, the upgrade command would no longer make sense. This has not been properly evaluated and thought about in the current design. It would require a dependency graph and would result in more sensible rejection manifests.
 
@@ -917,7 +919,7 @@ This thesis investigated the following research question: How can an offline-onl
 
 While considering this problem, the starting point was to analyze the weaknesses and strengths of a typical server-authoritative persistence model. In such a model, state changes are all done as transactional SQL commands against a centralized cloud backend. This is a robust persistence model implementation, with consistency guarantees. It does not allow offline player progression, however. With a server-authoritative model, there is no offline or local multiplayer game modes. To enable offline play, it is therefore important to find a way to handle divergent world state.
 
-Two offline-only models were discussed, and evaluated before arriving at the suggested command-based design. The simplest way to make offline functionality in a game with a server-authoritative persistence model is to simply mirror the online database with a local SQLite database. To do this one should provide a consistent programming interface for persistence, a Database Interface (DBI) which routes all persistence logic to the right place. The persistence interface does not by itself know how to reconcile divergent state which occur during an offline session, complicating reconnecting online after playing solo. Another model considered was a Object–Relational Mapping layer. This model would not solve reconnection to an online service either. The model was eventually rejected due to a fundamental mismatch: an ORM tracks object state, the commandlog design tracks intent.
+Two offline-only models were discussed, and evaluated before arriving at the suggested command-based design. The simplest way to make offline functionality in a game with a server-authoritative persistence model is to simply mirror the online database with a local SQLite database. To do this one should provide a consistent programming interface for persistence, a Database Interface (DBI) which routes all persistence logic to the right place. The persistence interface does not by itself know how to reconcile divergent state which occur during an offline session, complicating reconnecting online after playing solo. Another model considered was an Object–Relational Mapping layer. This model would not solve reconnection to an online service either. The model was eventually rejected due to a fundamental mismatch: an ORM tracks object state, the commandlog design tracks intent.
 
 The proposed solution is a command-based replication model. Rather than attempting to synchronize static snapshots of two databases on reconnection online, the commandlog system records player intent as serializable commands that can be replayed on the authoritative server. This system does not say what the changes should be, but instead why the changes should happen. The commandlog system solves all three parts of the research question as follows:
 
@@ -929,7 +931,7 @@ The proposed solution is a command-based replication model. Rather than attempti
 
 When implementing this design it is important to remember that the commands must be deterministic and replay-safe. Commands must be stored in the order they were generated during an offline session. The server-side validation logic must cover all command types to prevent exploitation. These constraints are manageable, and should not require major refactoring of a server-authoritative system, but great care must be taken to implement this correctly on a production system.
 
-In conclusion, the results suggest it is possible to use a command-based synchronization model to provide an extensible and practical hybrid offline–online persistence system for  survival video games. Offline-online synchronization can be achieved without fundamentally redesigning an existing server-authoritative model.
+In conclusion, the results suggest it is possible to use a command-based synchronization model to provide an extensible and practical hybrid offline–online persistence system for survival video games. Offline-online synchronization can be achieved without fundamentally redesigning an existing server-authoritative model.
 
 \newpage
 
