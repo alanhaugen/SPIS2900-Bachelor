@@ -166,9 +166,7 @@ A well-designed DBI supports atomicity, consistency, and \gls{idempotency}. If a
 
 A SQL-based DBI architecture treats the cloud-hosted SQL database as the single authoritative source of truth for all persistent game state. This provides strong consistency guarantees in fully online environments, but it inherently depends on centralized authority and does not account for state divergence in disconnected scenarios. See the listing below:
 
-\newpage
-
-\begin{lstlisting}[language=C++, caption={DBI interface (abstract base class)}]
+\begin{lstlisting}[language=C++, basicstyle=\tiny, caption={DBI interface (abstract base class)}]
 class IDatabaseInterface
 {
 public:
@@ -190,11 +188,11 @@ public:
 
 \subsection{Limitations of Server-Authoritative Architectures}
 
-A server-authoritative persistence architecture requires continuous internet connectivity to a centralized cloud-based server. Although this model is good for consistency, all players in online game will without question see the same data and be in the same world, it entails significant drawbacks when developers want to support offline or hybrid offline-online game modes:
+A server-authoritative persistence architecture requires continuous internet connectivity to a centralized cloud-based server. Although this model is good for consistency, it entails significant drawbacks when developers want to support offline or hybrid offline-online game modes:
 
 Since all actions that will change the database data are executed as remote transactions, gameplay cannot progress without server access. This makes offline play impossible. If the online service is shut down, the game will no longer function. It also becomes more difficult to deploy the game on platforms where online access requires a paid subscription. If a player loses internet connectivity mid-session, for example due to server maintenance, gameplay cannot continue. The client has no way to queue actions for later submission. For players from regions with unreliable internet connectivity, the game becomes more or less inaccessible. The combined architecture described in Section~\ref{sec:architecture} tackles these limitations by decoupling action generation from action transmission.
 
-In a purely server-authoritative model, the client does have a local database of the world state. While a temporary state may exist in memory during a session before being transmitted to an online server, durable storage is managed exclusively by remote infrastructure. This prevents local world progression during disconnection and support for local cooperative play modes becomes difficult to implement. Implementing a local persistence layer, such as the SQLite-backed DBI described in Section~\ref{sec:sqliteimp}, enables progress to persist across by writing state to disk which will allow offline sessions.
+In a purely server-authoritative model, the client does not have a local database of the world state. While a temporary state may exist in memory during a session before being transmitted to an online server, durable storage is managed exclusively by remote infrastructure. This prevents local world progression during disconnection and support for local cooperative play modes becomes difficult to implement. Implementing a local persistence layer, such as the SQLite-backed DBI described in Section~\ref{sec:sqliteimp}, enables progress to persist across by writing state to disk which will allow offline sessions.
 
 A server-authoritative architecture expects all state changes to happen linearly and does not allow modifications from offline sessions. For example, both offline players and the live server may modify the same entity independently. As a result, such architectures usually lack:
 
@@ -234,10 +232,10 @@ By storing intent rather than state, the game will not diff to databases and mer
 
 \newpage
 
-\begin{lstlisting}[language=C++, caption={Command structure and local command log}]
+\begin{lstlisting}[language=C++, basicstyle=\tiny, caption={Command structure and local command log}]
 struct Command
 {
-    std::string type;            // e.g. "CreateBuilding", "AddMoney"
+    std::string type;            // e.g. "CreateBuilding", "AddResource"
     int64_t     timestamp;       // UTC milliseconds at time of action
     std::string idempotencyKey;  // UUID to detect duplicate replays
     std::string entityId;        // ID of the affected entity
@@ -285,7 +283,7 @@ Just because entity versions do not match between local and server sessions, the
 
 \begin{enumerate}
   \item \textbf{Idempotent commands} — Quest completion, achievement unlocks, and similar boolean flags. These produce the same result regardless of how many times they are applied and can be safely replayed without harm.
-  \item \textbf{Commutative commands} — Additive operations such as resource collection, experience points, or money deltas. The order does not change the final value. These commands can simply have their deltas summed together with the existing entity.
+  \item \textbf{Commutative commands} — Additive operations such as resource collection, experience points, etc. The order does not change the final value. These commands can simply have their deltas summed together with the existing entity.
   \item \textbf{Non-commutative commands} — Spatial operations or building related such as destroying a building or placement of a vehicle. These need to be rejected and communicated to the reconnecting player if there is a conflict with server entities.
 \end{enumerate}
 
@@ -293,7 +291,9 @@ Just because entity versions do not match between local and server sessions, the
 
 For each conflict type a deterministic resolution must take place on the server before the command is committed. See listing below:
 
-\begin{lstlisting}[language=C++, caption={Server-side command validation and conflict resolution}]
+\newpage
+
+\begin{lstlisting}[language=C++, basicstyle=\tiny, caption={Server-side command validation and conflict resolution}]
 ReplayResult ReplayCommand(const Command& cmd, Database& db,
                            RejectionManifest& manifest)
 {
@@ -302,7 +302,7 @@ ReplayResult ReplayCommand(const Command& cmd, Database& db,
         return ReplayResult::Duplicate;
 
     // Commutative: apply delta regardless of entity version
-    if (cmd.type == "MoneyDelta")
+    if (cmd.type == "ResourceDelta" || "ReputationDelta")
         return db.ApplyDelta(cmd);
 
     // Non-commutative: validate entity state before committing
@@ -332,6 +332,8 @@ Commands that fail conflict resolution can not be silently discarded. They need 
 \label{sec:dispatch}
 
 Once \texttt{ReplayCommand} has processed a command and found it can be applied to the game state, it calls \texttt{db.Commit(cmd)}. This will check the \texttt{type} field of the Command and a DBI method is called. The Command is translated into SQL statements which can be applied on the server. Each command type corresponds directly to a single DBI method which produces SQL code and a transaction on the server. See the listing and table below:
+
+\newpage
 
 \begin{lstlisting}[language=C++, caption={Server-side command dispatch to DBI methods}]
 ReplayResult Database::Commit(const Command& cmd)
@@ -365,13 +367,13 @@ Command type & DBI method & SQL pattern \\
 \texttt{TransferItem}    & \texttt{TransferItem}          & \texttt{BEGIN; SELECT / UPDATE / UPSERT; COMMIT} \\
 \texttt{CreateBuilding}  & \texttt{CreateBuilding}        & \texttt{INSERT INTO buildings} \\
 \texttt{DestroyBuilding} & \texttt{DestroyBuilding}       & \texttt{DELETE FROM buildings WHERE id = ?} \\
-\texttt{MoneyDelta}      & \texttt{UpdateMoneyItem}       & \texttt{INSERT … ON CONFLICT DO UPDATE SET} \\
+\texttt{ResourceDelta}   & \texttt{UpdateResource}        & \texttt{INSERT … ON CONFLICT DO UPDATE SET} \\
 \texttt{ReputationDelta} & \texttt{UpdateFactionRelation} & \texttt{relation = relation + excluded.relation} \\
 \hline
 \end{tabular}
 \end{center}
 
-The above are some examples of SQL patterns which could be used for the commands. \texttt{INSERT OR IGNORE} is for idempotent commands, these can be called many times without changing the database state. With this duplicates from for example calling a Quest command many times, will be ignored. This is really just an extra fail-safe in-case the built-in idempotency detection in the ReplayCommand method fails. (\texttt{ON CONFLICT DO UPDATE SET value = value + excluded.value}) is for money and reputation deltas, it simply adds the money or reputation delta to the column. \texttt{BEGIN}/\texttt{COMMIT} is a transaction for \texttt{TransferItem}. Transactions like these ensures atomicity: either both succeed or neither does. This prevents an inventory item from being lost or getting duplicated in-case the transaction fails. For existing games one might already have a DBI implementation, each command must simply correspond to a DBI method.
+The above are some examples of SQL patterns which could be used for the commands. \texttt{INSERT OR IGNORE} is for idempotent commands, these can be called many times without changing the database state. With this duplicates from for example calling a Quest command many times, will be ignored. This is really just an extra fail-safe in-case the built-in idempotency detection in the ReplayCommand method fails. (\texttt{ON CONFLICT DO UPDATE SET value = value + excluded.value}) is for resource and reputation deltas, it simply adds the resource or reputation delta to the column. \texttt{BEGIN}/\texttt{COMMIT} is a transaction for \texttt{TransferItem}. Transactions like these ensures atomicity: either both succeed or neither does. This prevents an inventory item from being lost or getting duplicated in-case the transaction fails. For existing games one might already have a DBI implementation, each command must simply correspond to a DBI method.
 
 \subsection{Integration Possibilities}
 
@@ -520,7 +522,7 @@ Commands & Time (ms) & Throughput (cmd/s) & Applied \\
 \end{tabular}
 \end{center}
 
-Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands (Figure~\ref{fig:throughput}). A log of 10.000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30 \% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
+Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands (Figure~\ref{fig:throughput}). A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30 \% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
 
 \begin{figure}[h]
 \centering
@@ -553,7 +555,7 @@ Throughput is consistent at approximately 5–7 million commands per second acro
 \label{fig:throughput}
 \end{figure}
 
-During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50.000 commands took 2939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
+During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50,000 commands took 2939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
 
 \subsection{Command Log Backend Comparison}
 
@@ -572,7 +574,7 @@ Commands & Mem. Append (ms) & SQL Append (ms) & Mem. Get (ms) & SQL Get (ms) \\
 \end{tabular}
 \end{center}
 
-SQLite append is approximately 250 times slower than in-memory (33 ms vs 0,13 ms for 10.000 commands), as shown in Figure~\ref{fig:backends}; this is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10.000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10.000 commands SQLite takes under 2 ms.
+SQLite append is approximately 250 times slower than in-memory (33 ms vs 0,13 ms for 10,000 commands), as shown in Figure~\ref{fig:backends}; this is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
 
 \begin{figure}[h]
 \centering
@@ -612,7 +614,7 @@ SQLite append is approximately 250 times slower than in-memory (33 ms vs 0,13 ms
 
 \subsection{Conflict Detection Overhead}
 
-The third benchmark holds the command count fixed at 10.000 and varies the proportion of commands that are guaranteed to produce a version conflict, from 0 \% to 100 \%.
+The third benchmark holds the command count fixed at 10,000 and varies the proportion of commands that are guaranteed to produce a version conflict, from 0 \% to 100 \%.
 
 \begin{center}
 \begin{tabular}{rrrr}
@@ -675,7 +677,7 @@ Commands & Append (ms) & GetPending (ms) & ReplayAll (ms) & Total (ms) \\
 \end{tabular}
 \end{center}
 
-A full session of 10.000 commands completes in approximately 38 ms end-to-end (Figure~\ref{fig:roundtrip}). SQLite append accounts for roughly 80 \% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
+A full session of 10,000 commands completes in approximately 38 ms end-to-end (Figure~\ref{fig:roundtrip}). SQLite append accounts for roughly 80 \% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
 
 \begin{figure}[h]
 \centering
@@ -734,7 +736,7 @@ The per-command cost stabilizes at approximately 128 bytes for logs of 1000 comm
 
 The high per-command cost at small log sizes (327 bytes at 100 commands) is a consequence of SQLite's fixed page size of 4 KB: even a single-row database occupies at least two pages — one for the data table and one for the unique index. Once the log grows large enough to fill pages efficiently the overhead drops to the steady-state figure.
 
-In practical terms, a 1.000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10.000 commands occupies approximately 1,2 MB (Figure~\ref{fig:diskfootprint}). These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
+In practical terms, a 1.000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10.000 commands occupies approximately 1.2 MB (Figure~\ref{fig:diskfootprint}). These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
 
 \begin{figure}[h]
 \centering
@@ -762,7 +764,7 @@ In practical terms, a 1.000-command offline session — already a large session 
 };
 \end{axis}
 \end{tikzpicture}
-\caption{Command log file size grows linearly with command count; 10{.}000 commands occupy $\sim$1,2 MB.}
+\caption{Command log file size grows linearly with command count; 10{,}000 commands occupy $\sim$1.2 MB.}
 \label{fig:diskfootprint}
 \end{figure}
 
@@ -804,7 +806,7 @@ Poor mobile  & 10,000 & 40.22 & 315.79 & 356.01 \\
 \end{tabular}
 \end{center}
 
-For small logs (100 commands), the local cost is negligible at 0,5 ms; reconnection time is dominated almost entirely by network latency regardless of log size. Even on a poor mobile connection (300 ms RTT, 5\% loss), a 10.000-command log synchronizes in approximately 356 ms — well under half a second for what is already an unrealistically large offline session. Figure~\ref{fig:network} visualises the local–network breakdown for the 10.000-command case.
+For small logs (100 commands), the local cost is negligible at 0,5 ms; reconnection time is dominated almost entirely by network latency regardless of log size. Even on a poor mobile connection (300 ms RTT, 5\% loss), a 10,000-command log synchronizes in approximately 356 ms — well under half a second for what is already an unrealistically large offline session. Figure~\ref{fig:network} visualises the local–network breakdown for the 10,000-command case.
 
 \begin{figure}[h]
 \centering
@@ -833,7 +835,7 @@ For small logs (100 commands), the local cost is negligible at 0,5 ms; reconnect
 \addlegendentry{Network}
 \end{axis}
 \end{tikzpicture}
-\caption{Reconnection time breakdown for 10{.}000 commands: local processing is constant at $\sim$40 ms; network RTT dominates under high-latency conditions.}
+\caption{Reconnection time breakdown for 10{,}000 commands: local processing is constant at $\sim$40 ms; network RTT dominates under high-latency conditions.}
 \label{fig:network}
 \end{figure}
 
@@ -856,13 +858,13 @@ This hybrid approach is a middle-ground between an always online model, and an a
 
 A C++ implementation was developed and benchmark results were made to support the architectural claims in the following ways:
 
-The replay throughput experiments demonstrate that processing a command log of 10.000 commands takes less than 2 ms in-memory and 38 ms with SQLite. These values indicate that in practice logging and running synchronization on reconnection will likely result in negligible loading times. The data sent at reconnection with the authoritative server is proportional to the number of actions performed offline. It does not correlate with the size of the game world itself. In a large persistent world, this will likely result in less data being sent to the servers on reconnection compared to snapshot-based methods.
+The replay throughput experiments demonstrate that processing a command log of 10,000 commands takes less than 2 ms in-memory and 38 ms with SQLite. These values indicate that in practice logging and running synchronization on reconnection will likely result in negligible loading times. The data sent at reconnection with the authoritative server is proportional to the number of actions performed offline. It does not correlate with the size of the game world itself. In a large persistent world, this will likely result in less data being sent to the servers on reconnection compared to snapshot-based methods.
 
 The conflict rate experiment shows something very useful: throughput varies by less than 20 \% across the full range of conflict rates, from 0 \% to 100 \%. This means the system does not degrade meaningfully under adversarial conditions, and conflict detection can be considered a negligible overhead rather than a potential bottleneck.
 
-Even on a bad mobile network (300 ms RTT, 5 \% packet loss), the network latency model indicates that a 10.000-command log takes about 356 ms end-to-end to reconnect. If players have a fast connection, for example with latency below 40 ms RTT, then the server-side processing becomes the bottleneck. With a slower connection with latency greater than 40 ms RTT, actually sending the commands to the server is the bottleneck. This shows that making the commandlog smaller by optimization is the best way to speed up reconnection with the server for players with fast internet connections. One could for example remove commutative commands where possible, by merging them together.
+Even on a bad mobile network (300 ms RTT, 5 \% packet loss), the network latency model indicates that a 10,000-command log takes about 356 ms end-to-end to reconnect. If players have a fast connection, for example with latency below 40 ms RTT, then the server-side processing becomes the bottleneck. With a slower connection with latency greater than 40 ms RTT, actually sending the commands to the server is the bottleneck. This shows that making the commandlog smaller by optimization is the best way to speed up reconnection with the server for players with fast internet connections. One could for example remove commutative commands where possible, by merging them together.
 
-During development, the benchmarking experiments revealed a major design flaw in the C++ implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} per Command. This triggered a linear search through the command queue. This was slow and produced O($n^2$) behaviour. Code review alone was not enough to discover this mistake: 50.000 commands took nearly 3 seconds process. After the fix, processing 50.000 commands took only 9 ms. This shows how important it is to do test-driven development, and to avoid adding tests and doing testing ad-hoc late in development.
+During development, the benchmarking experiments revealed a major design flaw in the C++ implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} per Command. This triggered a linear search through the command queue. This was slow and produced O($n^2$) behaviour. Code review alone was not enough to discover this mistake: 50,000 commands took nearly 3 seconds process. After the fix, processing 50,000 commands took only 9 ms. This shows how important it is to do test-driven development, and to avoid adding tests and doing testing ad-hoc late in development.
 
 \subsection{Scalability Considerations}
 \label{sec:scale}
@@ -921,9 +923,9 @@ The proposed solution is a command-based replication model. Rather than attempti
 
 \textbf{Consistency} is maintained by leaving the cloud server as the single authoritative source of truth. Offline commands are not committed to the server before they have been sent and validated server-side. Since each Command can translate into a DBI call, the same transactions can be applied during reconnection as during an online session. 
 
-\textbf{Conflict resolution} is the most important part of this design and is handled by classifying objects into three types. Furthermore, when the player goes offline, entity versioning to detect divergent state. The three types of commands are idempotent commands, which can be applied safely without rejection, commutative operations such as money transfers which can be merged via simple summation, and non-commutative operations, such as building a building or moving a vehicle, which needs to be either accepted or rejected server-side. Commands that are rejected will be sent and communicated to the player in a rejection manifest.
+\textbf{Conflict resolution} is the most important part of this design and is handled by classifying objects into three types. Furthermore, when the player goes offline, entity versioning is used to detect divergent state. The three types of commands are idempotent commands, which can be applied safely without rejection, commutative operations such as resource collection or experience points gained which can be merged via simple summation, and non-commutative operations, such as building a building or moving a vehicle, which needs to be either accepted or rejected server-side. Commands that are rejected will be sent and communicated to the player in a rejection manifest.
 
-\textbf{Reconnection performance} was evaluated by running tests on a single machine, including a network latency model. A log of 10.000 commands was replayed on a simulated server system in under 2 ms in memory, and under 40 ms end-to-end including a more realistic SQLite persistence model. When network overhead is added, even a poor mobile connection (300 ms RTT, 5 \% packet loss) produces a total reconnection time of approximately 356 ms. Conflict detection adds less than 20 \% overhead regardless of conflict rate, and the command log file remains under 1,2 MB at 10.000 commands. The results show that the design itself is unlikely to cause bottlenecks when players reconnect to an online server.
+\textbf{Reconnection performance} was evaluated by running tests on a single machine, including a network latency model. A log of 10,000 commands was replayed on a simulated server system in under 2 ms in memory, and under 40 ms end-to-end including a more realistic SQLite persistence model. When network overhead is added, even a poor mobile connection (300 ms RTT, 5 \% packet loss) produces a total reconnection time of approximately 356 ms. Conflict detection adds less than 20 \% overhead regardless of conflict rate, and the command log file remains under 1.2 MB at 10,000 commands. The results show that the design itself is unlikely to cause bottlenecks when players reconnect to an online server.
 
 When implementing this design it is important to remember that the commands must be deterministic and replay-safe. Commands must be stored in the order they were generated during an offline session. The server-side validation logic must cover all command types to prevent exploitation. These constraints are manageable, and should not require major refactoring of a server-authoritative system, but great care must be taken to implement this correctly on a production system.
 
