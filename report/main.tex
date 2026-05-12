@@ -91,7 +91,7 @@ This investigation considers a way to develop the persistence system of a modern
 
 The suggested design is intended to provide a way to support both offline and online functionality. Having the ability to make a game run offline is important, especially on console platforms where access to online multiplayer features typically requires a paid subscription service. A significant portion of console players therefore do not participate in online multiplayer environments \autocite{onlinegamers}. Playing with friends should be supported via local cooperative modes, both splitscreen and local listen server setup, while preserving core gameplay mechanics.
 
-This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assume continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite which can later be synchronized with the authoritative cloud-based server infrastructure.
+This requirement introduces architectural challenges which need to be addressed sensibly. Games on the market which support persistent game state stored exclusively in cloud-based SQL databases assume continuous server connectivity. Supporting offline gameplay necessitates a hybrid architecture in which persistent world state can be stored locally, potentially using embedded database solutions such as SQLite \autocite{sqliteorg} which can later be synchronized with the authoritative cloud-based server infrastructure.
 
 Many gamers prefer to play offline, but might want to connect online as they advance in the persistent world. Collaboration with other players is often necessary in survival games to navigate the harsh environment. Political dynamics and faction-based conflict play a central role in survival games, as groups of players compete for control and influence within the game’s persistent world \autocite{CERE2021105}. Designs that allow users to transition online after initial offline sessions are explored.
 
@@ -326,12 +326,12 @@ ReplayResult ReplayCommand(const Command& cmd, Database& db,
 
 \subsubsection{Rejection Manifest}
 
-Commands that fail validation are not silently discarded. Instead, they are collected into a rejection manifest that is returned to the client after the replay pass completes. The manifest records the command type, the reason for rejection, and the current server-side state of the affected entity. This allows the game to inform the player of which offline actions could not be applied and why, enabling the client to present meaningful feedback rather than silently losing progress.
+Commands that fail conflict resolution can not be silently discarded. They need to be collected and displayed to the player. This is the rejection manifest, a warning about what will not be applied to the game state if the player chooses to reconnect and what will be done about the changes. The manifest should show the command which was rejected, why it was rejected, and what on the server stopped it from being applied. This way the game has a way to warn the player about the consequences for reconnecting online, what will happen if they do so, and give the player a way to understand what happened during reconnection instead of simply finding the world in a different state than expected. Items or buildings which could not be committed could be stored in a server-side backpack and accessed by the player via a menu in the game.
 
 \subsection{Command Dispatch and SQL Execution}
 \label{sec:dispatch}
 
-Once \texttt{ReplayCommand} determines that a command passes validation, it calls \texttt{db.Commit(cmd)}. The commit step dispatches on the command's \texttt{type} field and invokes the corresponding method on the DBI, which translates the operation into one or more SQL statements. The mapping is straightforward: each command type corresponds directly to a single DBI method, and each DBI method is responsible for the SQL that implements the game-domain operation it represents.
+Once \texttt{ReplayCommand} has processed a command and found it can be applied to the game state, it calls \texttt{db.Commit(cmd)}. This will check the \texttt{type} field of the Command and a DBI method is called. The Command is translated into SQL statements which can be applied on the server. Each command type corresponds directly to a single DBI method which produces SQL code and a transaction on the server. See the listing and table below:
 
 \begin{lstlisting}[language=C++, caption={Server-side command dispatch to DBI methods}]
 ReplayResult Database::Commit(const Command& cmd)
@@ -354,30 +354,34 @@ ReplayResult Database::Commit(const Command& cmd)
 }
 \end{lstlisting}
 
-Each DBI method executes a specific SQL pattern chosen to preserve the correctness properties of that command class:
+Each DBI method executes SQL with the properties from the command:
 
 \begin{center}
 \begin{tabular}{lll}
 \hline
 Command type & DBI method & SQL pattern \\
 \hline
+\texttt{CompleteQuest}   & \texttt{CompleteQuest}         & \texttt{INSERT OR IGNORE INTO completed\_quests} \\
+\texttt{TransferItem}    & \texttt{TransferItem}          & \texttt{BEGIN; SELECT / UPDATE / UPSERT; COMMIT} \\
 \texttt{CreateBuilding}  & \texttt{CreateBuilding}        & \texttt{INSERT INTO buildings} \\
 \texttt{DestroyBuilding} & \texttt{DestroyBuilding}       & \texttt{DELETE FROM buildings WHERE id = ?} \\
-\texttt{TransferItem}    & \texttt{TransferItem}          & \texttt{BEGIN; SELECT / UPDATE / UPSERT; COMMIT} \\
-\texttt{CompleteQuest}   & \texttt{CompleteQuest}         & \texttt{INSERT OR IGNORE INTO completed\_quests} \\
-\texttt{ResourceDelta}   & \texttt{UpdateFactionRelation} & \texttt{INSERT … ON CONFLICT DO UPDATE SET} \\
+\texttt{MoneyDelta}      & \texttt{UpdateMoneyItem}       & \texttt{INSERT … ON CONFLICT DO UPDATE SET} \\
 \texttt{ReputationDelta} & \texttt{UpdateFactionRelation} & \texttt{relation = relation + excluded.relation} \\
 \hline
 \end{tabular}
 \end{center}
 
-The SQL patterns are not arbitrary. \texttt{INSERT OR IGNORE} for quest completion makes the operation inherently idempotent at the database level — a duplicate replay of the same quest completion is silently discarded even if the idempotency check at the application level somehow fails. The UPSERT pattern for resource and reputation deltas (\texttt{ON CONFLICT DO UPDATE SET value = value + excluded.value}) accumulates the delta additively, which is the correct merge behaviour for commutative operations regardless of how many times the command is replayed. The explicit \texttt{BEGIN}/\texttt{COMMIT} transaction wrapping \texttt{TransferItem} ensures that the debit from the sender and the credit to the recipient are atomic — either both succeed or neither does, preventing inventory from being created or destroyed by a partial failure.
+The above are some examples of SQL patterns which could be used for the commands. \texttt{INSERT OR IGNORE} is for idempotent commands, these can be called many times without changing the database state. With this duplicates from for example calling a Quest command many times, will be ignored. This is really just an extra fail-safe in-case the built-in idempotency detection in the ReplayCommand method fails. (\texttt{ON CONFLICT DO UPDATE SET value = value + excluded.value}) is for money and reputation deltas, it simply adds the money or reputation delta to the column. \texttt{BEGIN}/\texttt{COMMIT} is a transaction for \texttt{TransferItem}. Transactions like these ensures atomicity: either both succeed or neither does. This prevents an inventory item from being lost or getting duplicated in-case the transaction fails. For existing games one might already have a DBI implementation, each command must simply correspond to a DBI method.
 
 \subsection{Integration Possibilities}
 
-In a server-authoritative game, every action that should persist goes through the DBI. By extending the DBI into a factory that produces command objects, the system can route actions in two ways depending on connectivity state: online commands are transmitted to the server immediately, while offline commands are serialized and stored on disk, deferred until the player reconnects.
+In a server-authoritative game, every action which has to do with persistence should happen through a common Database Interface (DBI). The DBI could become a factory that produces command objects, and depending on the player session the DBI could be swapped out: online commands would use a DBI where actions take place on the server immediately, while the offline DBI would queue up commands and store them on disk. When the player reconnects online, the queue is flushed and conflicts dealt with.
 
-The routing decision is straightforward to implement. A factory function checks connectivity and returns the appropriate DBI implementation:
+The offline DBI would still have a database implementation, implemented in for example SQLite, to allow the game to know about its own state. When a player opens the inventory in the game, for example, the game needs to have a way to ask a database what is in the inventory. So the offline DBI would consist of a SQLite database, for world state, and a queue to store the intent of the player for later synchronization with the online authoritative server. Ideally the SQL commands would be identical on the online server and on the offline SQL database, simplifying implementation. 
+
+\newpage
+
+The command routing is straightforward to implement. A DBI factory checks connectivity and returns the appropriate DBI implementation:
 
 \begin{lstlisting}[language=C++, caption={Connectivity-aware DBI factory}]
 std::unique_ptr<IDatabaseInterface> CreateDBI(bool isOnline)
@@ -389,9 +393,9 @@ std::unique_ptr<IDatabaseInterface> CreateDBI(bool isOnline)
 }
 \end{lstlisting}
 
-Game code calls DBI methods without knowing which backend is active. When connectivity is restored, the engine drains the durable command log by calling \texttt{ReplayAll}, which submits each queued command to the server in order and returns a \texttt{RejectionManifest} listing any commands that could not be applied.
+Game code calls DBI methods without concern of which backend has been created. The DBI has a common interface and can be swapped out. When the player rejoins an online session, the engine flushes command log by calling \texttt{ReplayAll}, this submits all the commands from the command queue to the authoritative server in the order they happened in the offline session and conflicts produce a \texttt{RejectionManifest} listing any commands that could not be applied. This list could be made accessible to the player after reconnection and a method to recover lost items or buildings could be implemented.
 
-Figure~\ref{fig:architecture} shows the overall data flow.
+Figure~\ref{fig:architecture} shows a flow chart of how the DBI system:
 
 \begin{figure}[h]
 \flushleft
@@ -431,58 +435,60 @@ A self-contained C++ prototype of the proposed architecture was developed alongs
 \url{https://github.com/alanhaugen/SPIS2900-Bachelor}
 \end{center}
 
-The prototype is located in the \texttt{app/} directory and is built with CMake. It depends only on Catch2, which is fetched automatically at configure time, and a system SQLite3 library. The implementation is organized as two libraries:
+The prototype is located in the \texttt{app/} directory. The prototype libraries and benchmark program is built using CMake. To ensure correctness of the implementation, the testing framework Catch2 was used. CMake has been configured to fetch the library automatically at configure time. A system SQLite3 library is expected. On MacOS, SQLite3 is part of the base system and is already installed. The implementation is organized as two libraries:
 
-\textbf{\texttt{offline\_sync\_lib}} contains the core persistence abstractions:
+\textbf{\texttt{offline\_sync\_lib}} contains the core persistence abstractions without a SQLite database:
 \begin{itemize}
-  \item \texttt{IDatabaseInterface} — the abstract DBI used by game code, with virtual methods for all persistent game actions.
-  \item \texttt{Command} and \texttt{CommandLog} — the in-memory command queue described in Section~\ref{sec:commandbased}.
-  \item \texttt{Database} — a lightweight in-memory entity store used for testing, with version tracking and idempotency key recording.
+  \item \texttt{IDatabaseInterface} — this is the abstract DBI used by game code, it is a factory following the Service Locator pattern \autocite{nystrom2014servicelocator}, with purely virtual methods for all persistent game actions.
+  \item \texttt{Command} and \texttt{CommandLog} — an in-memory implementation of command queue described in Section~\ref{sec:commandbased}.
+  \item \texttt{Database} — an alternative lightweight in-memory entity store, used for testing, with version tracking and idempotency key recording.
   \item \texttt{ReplayCommand} / \texttt{ReplayAll} — the conflict-resolution algorithm from Section~\ref{sec:conflictresolution}, including the \texttt{RejectionManifest} type.
 \end{itemize}
 
-\textbf{\texttt{offline\_sync\_sqlite\_lib}} contains the SQLite-backed implementations:
+\textbf{\texttt{offline\_sync\_sqlite\_lib}} contains the SQLite-backed implementations as suggested in the thesis:
 \begin{itemize}
   \item \texttt{SQLiteDBI} — a concrete implementation of \texttt{IDatabaseInterface} that stores game state in a local SQLite file. It maintains game-domain tables for buildings, item inventories, completed quests, and faction relations. Item transfers execute inside an explicit SQLite transaction and are rejected atomically if the sender has insufficient inventory. Quest completion uses \texttt{INSERT OR IGNORE} to preserve idempotency. Faction relation updates use an UPSERT to accumulate signed deltas.
-  \item \texttt{SQLiteCommandLog} — a durable replacement for the in-memory \texttt{CommandLog} that writes each command to a SQLite file before returning. The \texttt{idempotency\_key} column carries a \texttt{UNIQUE} constraint so that a double-append is silently discarded at the database level. Commands survive process restarts and can be recovered on next open.
+  \item \texttt{SQLiteCommandLog} — a durable replacement for the in-memory \texttt{CommandLog} that writes each command to a SQLite file before returning. This is one way to store the commandlog. The \texttt{idempotency\_key} column carries a \texttt{UNIQUE} constraint so that a double-append is silently discarded at the database level. Commands survive process restarts and can be recovered on next open.
 \end{itemize}
 
-The prototype includes 31 Catch2 unit tests covering the command log, idempotency, commutative merging, non-commutative conflict detection, SQLite persistence, and a full offline-session integration scenario.
+The \texttt{offline\_sync\_lib} is simpler and does not support commandlog survival and has a simpler local database implementation, while the \texttt{offline\_sync\_sqlite\_lib} implementation uses SQLite for the local game world state and another SQLite database to store the commandlog. The two implementations demonstrate how the \texttt{IDatabaseInterface} abstraction allows the implementation of the DBI to be swapped out without changing game code.
+
+The prototype includes 31 Catch2 unit tests covering the command log, idempotency, commutative merging, non-commutative conflict detection, SQLite persistence, and an offline-session scenario.
 
 \newpage
 
 \section{Alternative State Replication Persistence Architectures}
 \label{sec:alt}
 
-Other simpler alternatives to the Command-Based State Replication have been considered and will be described and discussed below. Some of the problems with the alternative architectures revolve around a lack of functionality for solving divergent state (see section \ref{sec:sqliteimp}) and implementation complexity (see section \ref{sec:ormimp}).
+Other simpler alternatives to the Command-Based State Replication have been considered and will be described and discussed below. Some of the problems with the alternative architectures revolve around not allowing players to reconnect online after an offline session due to state divergence (see section \ref{sec:sqliteimp}) and the added complexity of the implementation in addition to not solving the problem of allowing players reconnect online (see section \ref{sec:ormimp}).
 
 \subsection{Local Persistence via SQLite}
 \label{sec:sqliteimp}
 
-A direct approach to enabling offline functionality is to extend the Database Interface (DBI) abstraction with a complete SQLite-backed implementation. Rather than communicating with remote SQL servers, the DBI would execute equivalent operations against a locally embedded SQLite database during offline sessions.
+A most obvious way to add offline functionality to a game running the server-authoritative model is to implement an offline Database Interface (DBI) implementation with a complete port of the implementation to SQLite. If the cloud-server is already using SQLite, this process becomes even simpler. Rather than sending commands to remote SQL servers, the DBI would simply execute equivalent commands on a local SQLite database during an offline session.
 
-SQLite \autocite{sqliteorg} is an embedded, serverless, ACID-compliant relational database engine that operates as a lightweight C/C++ library. Unlike other SQL implementations, it does not require a separate server process; instead, it runs within the host application and stores data in a single file on disk. This makes it well-suited for offline persistence in desktop and console environments.
+SQLite \autocite{sqliteorg} is an embedded, serverless, ACID-compliant relational database engine. It can be included into any C++ program as a simple and lightweight static library. This makes this implementation easy to support, other SQL implementations usually require a separate server process running in the background. This is not supported on all platforms, such as console. SQLite is embedded inside the main application and stores data in a single file on disk. This makes it well-suited for offline persistence on both personal computers and consoles.
 
-By preserving the DBI abstraction layer, the system can maintain a consistent programming interface for persistence operations regardless of connectivity state. When offline, DBI calls would be routed to the SQLite backend. When online, calls would be directed to the existing SQL infrastructure.
+By using a DBI abstraction layer, the game can have a consistent programming interface for persistence operations which can stay the same for both offline and online sessions. Gameplay code does not need to be touched or rewritten. When offline, all DBI calls would be routed to the SQLite backend. When online, all DBI calls would sent remotely to the online SQL infrastructure.
 
-This design minimizes disruption to the gameplay code, as the persistence boundary remains unchanged. However, it introduces challenges related to schema compatibility, transaction semantics, and synchronization between the local SQLite instance and the authoritative cloud database.
+Such a design would result in minimal changes to the game code, the persistence boundary remains unchanged. However, how do you deal with players who want to return to an online session? How do you copy an online database down to a private offline session? If the online server uses a different SQL implementation than the offline SQLite schema, conversion wrappers must be written. Transaction semantics might need to be reconsidered, synchronization between the local SQLite instance and the authoritative cloud database can become very complicated and detecting fraud would be incredibly difficult.
 
-A deeper limitation is that a SQLite-backed DBI alone is not sufficient for synchronization. The SQLite DBI is a \emph{readable state store} — it answers the question "what does the world look like right now?" and allows the game to display inventory, buildings, and quest progress during an offline session. What it does not provide is a record of what \emph{changed} during that session. On reconnection, the server has no way to know which operations the player performed; it can only observe that local and remote state have diverged. Merging two divergent snapshots requires structural diffing of every entity, which becomes increasingly error-prone as the world model grows more complex.
+A SQLite-backed DBI alone is not enough to enable offline-online synchronization. The SQLite DBI is a \emph{readable state store}, it answers the question "what does the world look like right now?" and allows the game to display inventory, buildings, and quest progress during an offline session. However, it does not have information about what has \emph{changed} during the offline session. On reconnection, the server will not have any way to know which operations the player has actually performed, all it gets is a complete snapshot of the game state with information on how the game has diverged from the online game. Merging two divergent snapshots is complicated, it will require diffing the two databases, find every entity affected, and apply the changes. This might not even be possible as the divergence becomes greater during a play session, and entities are deleted and added on both the online and offline session.
 
-A structural diff is insufficient for two deeper reasons. First, a diff records \emph{what changed}, not \emph{what the player did}: if a player's gold balance fell by 20, the diff sees $-20$, but whether that was a purchase, a trade, or a quest cost determines which server-side validation rules apply and what happens if the change is rejected. Without the originating operation, the server cannot classify the change or apply a meaningful resolution policy. Second, operations that cancel within a session leave no trace: if a player builds a structure and then demolishes it while offline, the net diff is empty — yet both actions consumed resources and triggered side-effects that the server must account for. A command log captures every step; a diff only captures the outcome.
+A structural diff is insufficient for two reasons. First, a diff records \emph{what changed}, not \emph{what the player did}: if a player's money balance fell by 20, the diff sees $-20$. However, what the player did becomes invisible. Was the change due to a purchase, a discovered treasure chest, or a quest being completed? With a snapshot diff only, there is no way for the server to determine how the diff happened and server-side validation rules become impossible to implement. Without knowing the original action, the server cannot classify the change or apply a meaningful resolution policy. Second, operations that cancel out during an offline session leave no trace: if a player builds a structure and then demolishes it while offline, it would be the same as doing nothing in the game to the online server. Yet those actions will consume resources and trigger side-effects such as experience points gained which should be validated on the server. A command log captures every step while a diff only captures the outcome.
 
-This is why the command log is a necessary complement rather than an optional addition. The command log is a \emph{pending change queue} — it records each action as it is taken so that the exact sequence of player intent can be replayed on the server. After a successful replay the log is drained; the SQLite state store is not. The two components answer different questions and cannot substitute for each other: removing the command log leaves no replay record, while removing the SQLite DBI leaves the game unable to read any state while offline.
+This is why the command log is a necessary complement rather than an optional addition. The command log is a \emph{pending change queue}. It is a record of all the actions that the player has done in the order the actions were made, it shows the player intent and can be safely replayed on the server. After a successful replay the log is flushed and forgotten about. Then the SQLite database can be forgotten as well and the player can return to an online SQL database. The two components answer different questions. One cannot substitute the other: removing the command log leaves no replay record, while removing the SQLite DBI leaves the game unable to read any state, such as what the inventory currently holds, or what quests are active, while offline.
 
 \subsection{ORM (Object-Relational Mapping)}
 \label{sec:ormimp}
 
-An alternative architectural approach considered was the introduction of an Object–Relational Mapping (ORM) system. An ORM provides a layer that maps in-memory C++ objects directly to relational database structures, allowing persistent entities to be stored and retrieved without writing explicit SQL logic. In such a system, game objects (e.g., inventory items, buildings, or quests) would be automatically translated into database rows and reconstructed from relational data.
+At the beginning of the project, an Object–Relational Mapping (ORM) system was considered for the project. An ORM is a reflection layer which allows objects to translate directly to SQL and back again. This is a technically interesting solution which would allow all persistent state (e.g., inventory items, buildings, quests, etc.) to automatically get translated into the database as they are manipulated on the client and to updated and reconstructed from relational data as well.
 
-ORM frameworks are common in higher-level languages such as Python and Java, where reflection and dynamic typing simplify runtime type inspection and schema generation. In contrast, implementing a fully featured ORM in C++ presents additional complexity due to the lack of built-in reflection and the need for explicit type registration and serialization logic.
+ORM frameworks are not typical for C and C++ but are often seen in higher-level languages such as Python and Java. Languages with native reflection and dynamic typing make it much easier to implement runtime type inspection and to create SQL schema based on objects in memory. C++ does not have reflection and is statically typed, which makes it complicated to make a program to examine itself at runtime and add SQL serialization logic. However, a game engine like Unreal engine extends C++ with a reflection system, each object has extra information thanks to macros such as \texttt{USTRUCT} and \texttt{UCLASS} \autocite{unreal}. This system could be extended to support an ORM.
 
-The deeper problem, however, is a fundamental mismatch between the ORM model and the command-based architecture proposed in this thesis. An ORM operates on \emph{state}: it tracks which object fields have changed and generates SQL to persist the new snapshot. The command log operates on \emph{operations}: it records what the player did, not what the resulting world state looks like. These two models are philosophically opposed. If an ORM were used as the persistence layer, it would continuously collapse player actions into state diffs, discarding precisely the operation-level intent that the command log needs to preserve for server-side replay. The server would receive a snapshot of what changed, not a replayable record of how it changed — making conflict classification by command type impossible.
+The deeper problem, however, is a that the ORM model still does not solve synchronizing offline-online state. The command-based architecture proposed in this thesis is still the only solution presented which actually takes care of this problem. An ORM operates on \emph{state}: just like the SQLite-only implementation, it can only track which object fields have changed and generate SQL based on snapshots. The command log approach considers \emph{operations}: it logs player actions and intent, not the resulting world state only. These two models are philosophically opposed. If an ORM were used as the persistence layer, it would not generate a record of actions and would lose the intent that the command log gathers up for server-side replay. With ORM the server would only receive a snapshot of what changed, it would not be able to replay the actions in order and deal with conflict resolution in a straightforward manner. That might even be impossible with ORM.
 
-By contrast, the DBI abstraction already provides the backend-agnosticism that an ORM is typically chosen for: game code interacts with a stable interface and is unaware of whether calls are routed to a remote SQL server or a local SQLite file. The difference is that the DBI exposes game-domain operations (\texttt{TransferItem}, \texttt{CompleteQuest}) rather than generic object persistence, which is exactly the granularity needed to classify commands for conflict resolution. The DBI is, in effect, a domain-specific alternative to a generic ORM — and for this use case, the domain-specific design is the more appropriate choice.
+The DBI abstraction is already an excellent backend-agnostic abstraction, replacing it with ORM would simply add complexity. Game code should interact with a interface and should not be aware of the backend-implementation. The game code should not care if the game is running online, or if it is being used in an offline session. A great thing about the DBI is that is exposes all persistence methods in one place, such as (\texttt{TransferItem}, \texttt{CompleteQuest}), rather than having generic persistence in different places across the codebase. Without this, it becomes difficult to classify commands for conflict resolution. The DBI is a domain-specific and explicit, it is better suited than a generic ORM. A DBI is the best solution for a persistence system due to its simplicity and compatibility with existing authoritative server architectures.
 
 \newpage
 
@@ -497,7 +503,7 @@ The implementation is covered by 31 Catch2 unit and integration tests organised 
 
 \subsection{Replay Throughput}
 
-The first benchmark measures how quickly the in-memory replay engine can process a command log of increasing size, using one unique entity per command to isolate the cost of the replay loop itself from conflict resolution overhead.
+The first benchmark measures how quickly the in-memory replay engine can process a command log of increasing size, using one unique entity per command to isolate the cost of the replay loop itself from conflict resolution overhead. In the table below, \emph{Applied} denotes commands resolved as Committed or Duplicate — i.e.\ those that did not appear in the rejection manifest.
 
 \begin{center}
 \begin{tabular}{rrrr}
@@ -514,7 +520,7 @@ Commands & Time (ms) & Throughput (cmd/s) & Applied \\
 \end{tabular}
 \end{center}
 
-Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands (Figure~\ref{fig:throughput}). A log of 10,000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30\% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
+Throughput is consistent at approximately 5–7 million commands per second across all log sizes, confirming that replay scales linearly with the number of commands (Figure~\ref{fig:throughput}). A log of 10.000 commands — large by the standards of a single offline session — replays in under 2 milliseconds, well below any perceptible threshold. The applied count is lower than the total because 30 \% of commands are commutative and increment the entity version, causing subsequent non-commutative commands targeting the same entity to detect a version mismatch. This reflects realistic intra-session behaviour when a player modifies the same entity more than once.
 
 \begin{figure}[h]
 \centering
@@ -547,7 +553,7 @@ Throughput is consistent at approximately 5–7 million commands per second acro
 \label{fig:throughput}
 \end{figure}
 
-During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50,000 commands took 2,939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
+During development, this benchmark identified a quadratic performance issue in the initial implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} once per resolved command, each of which performed a linear scan of the pending vector. This produced O($n^2$) behaviour: 50.000 commands took 2939 ms before the fix. The fix — collecting all resolved keys and removing them in a single pass — reduced that to 9 ms, a 313-fold improvement.
 
 \subsection{Command Log Backend Comparison}
 
@@ -566,7 +572,7 @@ Commands & Mem. Append (ms) & SQL Append (ms) & Mem. Get (ms) & SQL Get (ms) \\
 \end{tabular}
 \end{center}
 
-SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms for 10,000 commands), as shown in Figure~\ref{fig:backends}; this is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10,000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10,000 commands SQLite takes under 2 ms.
+SQLite append is approximately 250 times slower than in-memory (33 ms vs 0,13 ms for 10.000 commands), as shown in Figure~\ref{fig:backends}; this is expected given that SQLite writes to disk with ACID guarantees. In absolute terms the overhead is still acceptable for an offline session: a player generating 10.000 actions — far more than a typical session — would incur roughly 33 ms of storage overhead. Retrieval via \texttt{GetPending} is fast in both backends; at 10.000 commands SQLite takes under 2 ms.
 
 \begin{figure}[h]
 \centering
@@ -606,7 +612,7 @@ SQLite append is approximately 250 times slower than in-memory (33 ms vs 0.13 ms
 
 \subsection{Conflict Detection Overhead}
 
-The third benchmark holds the command count fixed at 10,000 and varies the proportion of commands that are guaranteed to produce a version conflict, from 0\% to 100\%.
+The third benchmark holds the command count fixed at 10.000 and varies the proportion of commands that are guaranteed to produce a version conflict, from 0 \% to 100 \%.
 
 \begin{center}
 \begin{tabular}{rrrr}
@@ -622,7 +628,7 @@ Conflict rate & Time (ms) & Throughput (cmd/s) & Applied \\
 \end{tabular}
 \end{center}
 
-Throughput varies by less than 20\% across the full range of conflict rates (Figure~\ref{fig:conflicts}). Higher conflict rates are marginally faster because rejected commands skip the database write step. This confirms that the version check and classification logic add negligible overhead and that the system degrades gracefully under adversarial conflict conditions.
+Throughput varies by less than 20 \% across the full range of conflict rates (Figure~\ref{fig:conflicts}). Higher conflict rates are marginally faster because rejected commands skip the database write step. This confirms that the version check and classification logic add negligible overhead and that the system degrades gracefully under adversarial conflict conditions.
 
 \begin{figure}[h]
 \centering
@@ -648,7 +654,7 @@ Throughput varies by less than 20\% across the full range of conflict rates (Fig
 };
 \end{axis}
 \end{tikzpicture}
-\caption{Throughput remains within 20\% across all conflict rates, confirming conflict detection adds negligible overhead.}
+\caption{Throughput remains within 20 \% across all conflict rates, confirming conflict detection adds negligible overhead.}
 \label{fig:conflicts}
 \end{figure}
 
@@ -669,7 +675,7 @@ Commands & Append (ms) & GetPending (ms) & ReplayAll (ms) & Total (ms) \\
 \end{tabular}
 \end{center}
 
-A full session of 10,000 commands completes in approximately 38 ms end-to-end (Figure~\ref{fig:roundtrip}). SQLite append accounts for roughly 80\% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
+A full session of 10.000 commands completes in approximately 38 ms end-to-end (Figure~\ref{fig:roundtrip}). SQLite append accounts for roughly 80 \% of that time; actual replay takes only 6 ms. All three phases scale linearly with command count. The results indicate that reconnection latency attributable to synchronization is unlikely to be noticeable in practice for sessions of realistic size.
 
 \begin{figure}[h]
 \centering
@@ -702,7 +708,7 @@ A full session of 10,000 commands completes in approximately 38 ms end-to-end (F
 \addlegendentry{ReplayAll}
 \end{axis}
 \end{tikzpicture}
-\caption{Full offline session cost broken down by phase; SQLite append dominates at $\sim$80\% of total time.}
+\caption{Full offline session cost broken down by phase; SQLite append dominates at $\sim$80 \% of total time.}
 \label{fig:roundtrip}
 \end{figure}
 
@@ -724,11 +730,11 @@ Commands & File size (KB) & Bytes per command \\
 \end{tabular}
 \end{center}
 
-The per-command cost stabilizes at approximately 128 bytes for logs of 1,000 commands or more. This overhead has two components: the raw data content of each row (idempotency key at 36 bytes, type string at approximately 13 bytes, entity ID, two integers, and timestamp — roughly 75 bytes in total) and SQLite's structural overhead from the B-tree page layout and the secondary index on the \texttt{idempotency\_key} column, which adds approximately 50 bytes per row.
+The per-command cost stabilizes at approximately 128 bytes for logs of 1000 commands or more. This overhead has two components: the raw data content of each row (idempotency key at 36 bytes, type string at approximately 13 bytes, entity ID, two integers, and timestamp — roughly 75 bytes in total) and SQLite's structural overhead from the B-tree page layout and the secondary index on the \texttt{idempotency\_key} column, which adds approximately 50 bytes per row.
 
 The high per-command cost at small log sizes (327 bytes at 100 commands) is a consequence of SQLite's fixed page size of 4 KB: even a single-row database occupies at least two pages — one for the data table and one for the unique index. Once the log grows large enough to fill pages efficiently the overhead drops to the steady-state figure.
 
-In practical terms, a 1,000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10,000 commands occupies approximately 1.2 MB (Figure~\ref{fig:diskfootprint}). These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
+In practical terms, a 1.000-command offline session — already a large session by most standards — occupies 140 KB. A session of 10.000 commands occupies approximately 1,2 MB (Figure~\ref{fig:diskfootprint}). These figures are negligible on any modern storage medium and confirm that disk space is not a limiting factor for the command log approach.
 
 \begin{figure}[h]
 \centering
@@ -756,7 +762,7 @@ In practical terms, a 1,000-command offline session — already a large session 
 };
 \end{axis}
 \end{tikzpicture}
-\caption{Command log file size grows linearly with command count; 10{,}000 commands occupy $\sim$1.2 MB.}
+\caption{Command log file size grows linearly with command count; 10{.}000 commands occupy $\sim$1,2 MB.}
 \label{fig:diskfootprint}
 \end{figure}
 
@@ -798,7 +804,7 @@ Poor mobile  & 10,000 & 40.22 & 315.79 & 356.01 \\
 \end{tabular}
 \end{center}
 
-For small logs (100 commands), the local cost is negligible at 0.5 ms; reconnection time is dominated almost entirely by network latency regardless of log size. Even on a poor mobile connection (300 ms RTT, 5\% loss), a 10,000-command log synchronizes in approximately 356 ms — well under half a second for what is already an unrealistically large offline session. Figure~\ref{fig:network} visualises the local–network breakdown for the 10,000-command case.
+For small logs (100 commands), the local cost is negligible at 0,5 ms; reconnection time is dominated almost entirely by network latency regardless of log size. Even on a poor mobile connection (300 ms RTT, 5\% loss), a 10.000-command log synchronizes in approximately 356 ms — well under half a second for what is already an unrealistically large offline session. Figure~\ref{fig:network} visualises the local–network breakdown for the 10.000-command case.
 
 \begin{figure}[h]
 \centering
@@ -827,7 +833,7 @@ For small logs (100 commands), the local cost is negligible at 0.5 ms; reconnect
 \addlegendentry{Network}
 \end{axis}
 \end{tikzpicture}
-\caption{Reconnection time breakdown for 10{,}000 commands: local processing is constant at $\sim$40 ms; network RTT dominates under high-latency conditions.}
+\caption{Reconnection time breakdown for 10{.}000 commands: local processing is constant at $\sim$40 ms; network RTT dominates under high-latency conditions.}
 \label{fig:network}
 \end{figure}
 
@@ -840,69 +846,65 @@ The crossover point — where network overhead equals local processing cost — 
 
 \subsection{Architectural Trade-offs}
 
-There are many different ways to implement world persistence for online multiplayer games. Each model has its own set of advantages and disadvantages in terms of consistency, flexibility, and complexity.
+Persistent world state in online multiplayer games can be implemented in many different ways. Each model has its own advantages and disadvantages in terms of consistency, flexibility, and implementation complexity.
 
-Offline play becomes impossible with a purely server-authoritative architecture. However, it does provide strong consistency through having a single source of truth. This is because of the CAP theorem \autocite{gilbert2002cap}: consistency, availability, and partition tolerance cannot be accomplished simultaneously, only two of the three are possible at a time. A server-authoritative model focuses on consistency, and will not accept modification to the database if the network is partitioned (i.e. the client is offline). In the hybrid approach, as presented in this thesis, writing to the database is made possible locally while offline (during a partition), and is then later validated on reconnection. Consistency is sacrificed for the sake of availability, conflict resolution is used to restore consistency later on.
+Offline play becomes impossible in a purely server-authoritative architecture. However, the server-authoritative model does provide strong consistency by being a single source of truth. A database can't be consistent, offline and available at the same time due to the consequences of the CAP theorem \autocite{gilbert2002cap}: consistency, availability, and partition tolerance cannot all be accomplished simultaneously, only two of the three are possible at a time. A server-authoritative model focuses on consistency, and will not accept modification to the database if the network is partitioned (i.e. the client is offline). In the hybrid approach, as presented in this thesis, writing to a local database is made possible while offline (during a partition), and is then later validated on the cloud-based server during reconnection. Consistency is sacrificed for the sake of availability, conflict resolution is used to restore consistency later on.
 
-This hybrid approach is a middle-ground between an always online model, and always offline architecture. The Command-based model allows offline sessions, known as partitioning, which can later be synchronized and return as an online session. Synchronization does not happen by taking the diffs of two databases and adding them together, instead the suggested approach involves replaying commands which have been logged during the offline play session in the same order in which they are recorded, the intent of the player is preserved. Transactions on the server stay the same, the design doesn't require a major redesign of a typical and preexisting server-authoritative architecture. The greatest difficulty with this approach is to develop systems to recognize conflicts and to validate them on the server. Despite a complicated conflict-resolution implementation, this Command-based persistence method is still less invasive to the existing persistence layer in a server-authoritative architecture compared to adopting Conflict-free Replicated Data Types (CRDT) or the Operational Transformation (OT) approach.
+This hybrid approach is a middle-ground between an always online model, and an always offline model. The suggested Command-based model enables offline sessions, known as partitioning. Partitioned sessions can later be synchronized with the online server and allows a player to return online. Synchronization does not happen by taking the diffs of two databases and adding the diffs together: the suggested approach involves replaying commands recorded during offline play and replaying them on the server in the order in which they are recorded. The intent of the player, not only the changed state, is preserved. If the game has already been implemented with a server-authoritative architecture, transactions on the server stay the same. The design doesn't require a major redesign. The most important aspect of this approach is to develop systems to recognize conflicts and to validate them on the server. Despite a complicated conflict-resolution implementation, this Command-based persistence method is still less invasive to the existing persistence layer in a server-authoritative architecture compared to adopting Conflict-free Replicated Data Types (CRDT) or the Operational Transformation (OT) approach.
 
 \subsection{Evaluation Findings}
 
 A C++ implementation was developed and benchmark results were made to support the architectural claims in the following ways:
 
-The replay throughput experiments demonstrate that processing a command log of 10.000 has a total time of less than 2 ms in-memory and 38 ms including SQLite retrieval. These values indicate that in practice logging and running synchronization on reconnection will likely result in negligible loading times. This data sent on reconnection is proportional to number of actions performed offline and not the size of the world, in large persistent worlds this will likely be less data compared to snapshot-based methods.
+The replay throughput experiments demonstrate that processing a command log of 10.000 commands takes less than 2 ms in-memory and 38 ms with SQLite. These values indicate that in practice logging and running synchronization on reconnection will likely result in negligible loading times. The data sent at reconnection with the authoritative server is proportional to the number of actions performed offline. It does not correlate with the size of the game world itself. In a large persistent world, this will likely result in less data being sent to the servers on reconnection compared to snapshot-based methods.
 
-The result of the conflict rate experiment is of particular use: throughput is not much affected by the conflict rate over the entire range of conflict rates, from 0\% to 100\%. This implies that the system does not have a significant degradation in adverse situations and that detection of conflict is not a limiting factor, but rather can be considered as a small overhead.
+The conflict rate experiment shows something very useful: throughput varies by less than 20 \% across the full range of conflict rates, from 0 \% to 100 \%. This means the system does not degrade meaningfully under adversarial conditions, and conflict detection can be considered a negligible overhead rather than a potential bottleneck.
 
-Even on a bad mobile network (300 ms RTT, 5\% packet loss), the network latency model indicates that a 10.000-command log takes about 356 ms end-to-end to reconnect. If you have a connection speed of, say, below 40 ms RTT, then the processing cost will be the dominant factor, whereas if you have, say, above that, then the network latency will take over. In practice, compacting commutative deltas to save log space is a better optimisation than making replay more responsive for players on high latency connections.
+Even on a bad mobile network (300 ms RTT, 5 \% packet loss), the network latency model indicates that a 10.000-command log takes about 356 ms end-to-end to reconnect. If players have a fast connection, for example with latency below 40 ms RTT, then the server-side processing becomes the bottleneck. With a slower connection with latency greater than 40 ms RTT, actually sending the commands to the server is the bottleneck. This shows that making the commandlog smaller by optimization is the best way to speed up reconnection with the server for players with fast internet connections. One could for example remove commutative commands where possible, by merging them together.
 
-As part of the benchmarking process, the first implementation was found to be flawed. The original \texttt{ReplayAll} was making individual calls to \texttt{MarkFlushed} on each command that was being resolved, all of which did a linear scan on the pending vector. This gave rise to O($n^2$) behaviour: 50.000 commands used almost 3 seconds. This was reduced to 9 ms after a fix. This is one example of the benefits of performance testing, not only as a check at the end of the design process but during development as well.
+During development, the benchmarking experiments revealed a major design flaw in the C++ implementation. The original \texttt{ReplayAll} called \texttt{MarkFlushed} per Command. This triggered a linear search through the command queue. This was slow and produced O($n^2$) behaviour. Code review alone was not enough to discover this mistake: 50.000 commands took nearly 3 seconds process. After the fix, processing 50.000 commands took only 9 ms. This shows how important it is to do test-driven development, and to avoid adding tests and doing testing ad-hoc late in development.
 
 \subsection{Scalability Considerations}
 \label{sec:scale}
 
-The benchmarks characterise the performance of a single-client replay on one machine, which is a necessary but not sufficient basis for scalability claims about a large-scale multiplayer game. Several factors outside the scope of the prototype would affect performance in a production environment.
+The benchmarks are designed to show the performance of one client connected to the server at a time, which is not realistic on real-world servers. The benchmarks do not prove that the commandlog based implementation will scale well for thousands of players in a large-scale multiplayer game. There are many factors which go outside the scope of the current prototype which would affect the performance in a real-world environment.
 
-The server-side validation logic — checking entity versions and preconditions — was evaluated against an in-memory store. Against a real SQL database under concurrent load from many reconnecting players, validation throughput would depend heavily on database indexing, connection pooling, and transaction isolation levels. The benchmarks use a synthetic workload with uniformly distributed entity access. Real player behaviour may be bursty and spatially clustered, which could affect conflict rates and cache behaviour in ways not captured by the synthetic experiments.
+In the prototype, the server-side validation is done against an in-memory store. This is a great oversimplification. The database is used to store entity versions and preconditions, but should really use a real SQL database. To properly test the system, many concurrent users should add load to the system, not only one user as in the benchmark. Validation throughput would depend heavily on features of the database implementation. A SQL database is typically designed to operate under heavy load. The benchmarks do not test what would happen on real databases under a heavy workload. This is hard to test with synthetically. Real player behaviour is unpredictable. They could connect and reconnect in a more stochastic random manner. Connections could be occur suddenly at certain times of the day. This would change the conflict rates measurement and could cause behaviour which was not caught by the tests and experiments conducted for this thesis.
 
-These limitations do not undermine the core design, but they do mean that the benchmark results should be treated as indicative of single-client algorithmic performance rather than a prediction of production capacity.
+However, despite these limitations, the core design of the commandlog offline-online synchronization model is still sound. But the benchmarks should not be used as proof of how the algorithms or model would perform in a real-world system.
 
 \subsection{Limitations and Threats to Validity}
 
-The conflict resolution strategy handles the three command classes identified in this thesis — idempotent, commutative, and non-commutative — but does not cover all edge cases that a production system would encounter. The most significant gap is commands that depend on entities which were deleted server-side during the offline session: these are caught by the existence check in \texttt{ReplayCommand}, but the player receives only a rejection notification with no automatic recovery path. A production system would need policies for how to surface and resolve these failures in a way that makes sense within the game's design.
+The conflict resolution in this thesis categorises all commands as three types: idempotent, commutative, and non-commutative. For a real-world system, this might not be enough. In a modern survival video game, the game world would encounter command types that go beyond the scope of the conflict resolution strategy found in this thesis. In particular, solving what should happen if a player loses items or buildings as a result of \texttt{ReplayCommand} rejecting a command, for instance because the entity is out of date on the client or has been removed on the online server-side, has not been properly discussed. The user should at the very least be notified, but it is up to the specific game implementation to figure out how to present and offer players a way to recover lost progress. Resolving these failures do not have a general solution and will need to make sense within the game's design.
 
-The evaluation workload was generated synthetically using a uniform random distribution over entities and command types. It is not known whether this distribution is representative of real player behaviour, which likely varies by game genre, session length, and player experience level. Collecting telemetry from real offline sessions would allow future work to calibrate the benchmark parameters and test the system under more realistic conditions.
-
-Entity versioning relies on an implicit assumption that the server is the sole authority over version increments and that the counter is strictly monotonic. Under these conditions accidental version alignment is not possible: because versions only increase, any server-side modification to an entity will produce a version strictly higher than what the client recorded offline, and the mismatch will be detected correctly. However, this guarantee depends entirely on correct server-side implementation — a bug that modifies an entity without incrementing its version would silently pass the version check, allowing a potentially conflicting command to be committed. An alternative that does not carry this assumption is to store a cryptographic hash of the entity state alongside the version number. Because a hash reflects the actual content of the entity rather than a counter, it detects state changes even if the version increment is accidentally omitted. The trade-off is cost: hashing the full entity state on every command validation is more expensive than an integer comparison, and under reconnection load from many concurrent clients the overhead compounds. For a trusted server-authoritative environment the integer counter is sufficient; the hash approach is better suited to settings where the integrity of the version counter itself cannot be fully guaranteed.
+The evaluation metrics are based on data generated synthetically by uniform random distribution. This does not represent a real offline session in regards to manipulation of entities in an actual game world and the command types in the tests are not of a typical distribution found in a game played by actual human-beings. The distribution of commands and entities will likely differ based on game genre, session length, player experience, etc. It would have improved the thesis if actual telemetry from a real game was collected, future work could calibrate the tests and confirm if the system works under more realistic conditions.
 
 \subsection{Game Preservation}
 
-Beyond the technical design, offline functionality has an important consequence for the long-term availability of games as cultural artefacts. Games that depend on continuous server connectivity cease to function when the developer shuts down the online service, whether due to bankruptcy, acquisition, or commercial decision. Building in offline capability means that the game remains playable independently of the publisher's infrastructure, which is directly relevant to current policy debates around game preservation \autocite{ross}.
+Beyond the technical design, offline functionality has an important cultural significance. Games are now considered important cultural artefacts of value. If a game depends on an online service exclusively, and the developer shuts down the servers, whether due to bankruptcy, acquisition, or commercial decision, the games made with this model risk becoming unplayable abandonware. These games might never become playable again without server-support. That's why adding offline functionality to a game means more than simply giving players the freedom to play online. It will also preserve the game for future generations. With offline, the game becomes playable independently of the publisher's infrastructure, this is currently relevant and discussions around game preservation are currently being made at the EU Parliament \autocite{ross}.
 
 \subsection{Financial Considerations}
 
-Offline capability also has practical consequences for both players and developers that extend beyond technical design.
+Offline capabilities also has practical consequences for both players and developers that extend beyond technical design.
 
-From the player perspective, accessing online multiplayer on console platforms typically requires a paid subscription — PlayStation Plus, Xbox Game Pass Core, or Nintendo Switch Online. An offline-capable design removes this financial barrier \autocite{onlinegamers}, and broadens the reachable audience without requiring any change to the online multiplayer experience for players who do subscribe.
+For players, playing online often requires an online subscription. PlayStation Plus, Xbox Game Pass Core, or Nintendo Switch Online all cost money, and are required for online play. Adding offline functionality to a game will get rid of such barriers, making the game available to a greater number of players \autocite{onlinegamers}. Many people do not play games online on console, so adding offline broadens the reachable audience without requiring any change to the online multiplayer experience for players who do subscribe to online services.
 
-From the developer perspective, running always-on server infrastructure for a large-scale multiplayer game is expensive. Servers must remain provisioned and operational at all times, regardless of how many players are actually connected, to guarantee immediate availability when players log in. A hybrid architecture reduces this pressure: players who are offline generate no server load, and infrastructure can be scaled closer to active concurrent usage rather than peak theoretical demand.
+Offline functionality has also got a monetary dimension for the developers as well. Running a large number of servers is expensive. An always online game with thousands of players must always be ready, even when players are not connected. Players expect the servers to be ready for them when they connect online. A hybrid architecture allows players to play offline without adding load to the servers. Thus, servers can be scaled down to the actual demand rather than being ready for any player who bought the game.
 
 \newpage
 
 \section{Future Work}
 \label{sec:futurework}
 
-Several directions for future investigation emerge from the limitations identified in this thesis.
+There are many things this thesis did not explore with the C++ prototype, leaving some questions unanswered. Future research could entail:
 
-\textbf{Telemetry-calibrated benchmarks.} The evaluation used synthetically generated command logs with uniform random distributions. Collecting real telemetry from offline gameplay sessions would allow the benchmark parameters — entity access distributions, session lengths, conflict rates — to be calibrated against actual player behaviour. This would give a more reliable picture of expected performance and surface corner cases that synthetic workloads may miss.
+\textbf{Telemetry-calibrated benchmarks.} The current stochastic evaluation of synthetic data is not ideal. The commandlog has been generated using uniform random distributions. Collecting real telemetry from offline gameplay sessions could calibrate the results and give better information about the design's performance.
 
-\textbf{Production server-side scaling.} The server-side replay was evaluated against an in-memory entity store. A production deployment would run validation against a live SQL database under concurrent load from many clients reconnecting simultaneously. Future work should measure how the validation pipeline scales with database contention, test appropriate transaction isolation levels, and explore batching strategies for the server-side replay endpoint.
+\textbf{Production server-side scaling.} The current benchmarks did not use a real SQL database when simulating replay on the server-side. A production system would use an advanced and well tuned SQL database which would also be under stress from many concurrent connections and players enjoying the game. To properly consider the performance impact of the commandlog, the benchmark should use a system more similar to an actual production system under load.
 
-\textbf{Network latency modelling.} Replay throughput was measured locally, but in practice the command log is transmitted over a network before server-side validation begins. A more complete evaluation would model round-trip latency and measure how command log size affects reconnection time across different network conditions.
+\textbf{Recovery paths for rejected commands.} The current design returns a manifest of all the rejected commands. However, a solution to resolving and allowing players to recover what they lose have not been made in this thesis. A production system would need a way to communicate to the player which commands failed, why, and offer compensation. This is a game design problem, and should be taken seriously per game.
 
-\textbf{Recovery paths for rejected commands.} The current design returns a rejection manifest to the client but does not specify what the game should do with it. A production system would need player-facing flows for communicating which offline actions were declined and offering resolution options — for example, refunding consumed resources or offering equivalent substitute items. Designing these recovery policies in a way that is both technically correct and satisfying to players is a non-trivial game-design problem.
-
-\textbf{Command dependency graphs.} Some commands may depend on earlier commands in the same offline log — for example, building a structure and then upgrading it. If the first command is rejected, the second is also invalid regardless of its version check. Modelling explicit command dependencies would allow the replay engine to reject dependent chains early and produce more informative rejection manifests.
+\textbf{Command dependency graphs.} Some commands might rely on previous commands succeeding from the offline commandlog. For example, upgrading a building would rely on the building being successfully built in the first place. If the building is rejected by the server, the upgrade command would no longer make sense. This has not been properly evaluated and thought about in the current design. It would require a dependency graph and would result in more sensible rejection manifests.
 
 \newpage
 
