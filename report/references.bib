@@ -162,8 +162,6 @@ abstract = {Familiarity between members of the same group is predicted to play a
     year      = "2026",
 }
 
-%
-
 @article{MOLL2021107723,
 title = {A Quadtree-based synchronization protocol for inter-server game state synchronization},
 journal = {Computer Networks},
@@ -177,7 +175,6 @@ author = {Philipp Moll and Selina Isak and Hermann Hellwagner and Jeff Burke},
 keywords = {Named Data Networking, Distributed dataset synchronization, Online games},
 abstract = {Online games are a fundamental part of the entertainment industry but the current IP infrastructure does not satisfactorily fulfill the needs of these services. The novel networking architecture Named Data Networking (NDN) inherently supports network-level multicast and packet-level security and thereby introduces promising features for online games. In this paper, we propose an NDN-based approach to synchronize game state in a server cluster, a task necessary to allow multiple players in large numbers to play in the same game world. The proposed Quadtree Synchronization Protocol applies NDN’s data-centric nature to decouple the game world from the game servers hosting it. This means that requesting changes of a specific game world region becomes possible without knowing which game server is responsible for the requested region. We use a hierarchic game world structure when requesting data that allows the network to forward requests to the responsible game server without directly addressing it. This region-based naming scheme decouples world regions from servers which eases the management of the game server cluster and allows easier recovery after server failures. In addition, this decoupling allows exchanging information about a geographical region, such as a game world, without knowledge of the other participants changing the world. Such a region-based synchronization mode is not possible to implement with existing protocols. However, it allows building distributed systems that do not require a central server to work. Besides architectural benefits, network emulations show that our protocol increases the efficiency of data transport by utilizing network-level multicast. Our proposed approach can keep up with current protocols which can be used for inter-server game state synchronization.}
 }
-
 
 @article{unreal,
 title = {Unreal Property System (Reflection)},

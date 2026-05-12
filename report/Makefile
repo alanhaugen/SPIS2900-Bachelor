@@ -8,4 +8,4 @@ main.pdf: main.tex references.bib glossary.tex
 	pdflatex main
 
 clean:
-	rm -f *.aux *.bbl *.bcf *.blg *.log *.out *.pdf *.run.xml
+	rm -f *.aux *.bbl *.bcf *.blg *.log *.out *.pdf *.run.xml *.glg *.toc *.xml *.bbl *.blg *.bcf *.lol *.glo *.gls *.ist *.out
